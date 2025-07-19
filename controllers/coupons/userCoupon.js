@@ -130,21 +130,27 @@ const GetAllUserCoupons = async (req, res) => {
 
 const getUserDefaultCoupon = async (req, res) => {
   try {
-    const { email } = req.body
+    const { email } = req.body;
 
-    const findData = await UserCoupon.find({ assignedTo: email })
+    const findData = await UserCoupon.find({
+      $or: [
+        { assignedTo: email },
+        { assignedTo: { $regex: `\\(${email}\\)$`, $options: "i" } }
+      ]
+    });
+
     if (findData.length > 0) {
-      return res.status(200).json(findData)
+      return res.status(200).json(findData);
     } else {
-      return res.status(404).json({ message: "No coupon found" })
+      return res.status(404).json({ message: "No coupon found" });
     }
-  }
-  catch (error) {
+  } catch (error) {
     console.error("Error fetching user coupon:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
+};
 
-}
+
 
 module.exports = {
   GetAllUserCoupons,

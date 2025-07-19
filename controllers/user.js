@@ -9,7 +9,7 @@ const createSignup = async function (req, res) {
     try {
         const { email, mobile } = req.body;
         if (email) {
-            const existingCoupon = await UserCoupon.findOne({ assignedTo: email });
+            const existingCoupon = await UserCoupon.find({ assignedTo: email });
 
             if (!existingCoupon) {
                 const currentDate = new Date();
@@ -87,7 +87,7 @@ const GoogleSignIn = async function (req, res) {
     try {
         const { email, uid, userName, images } = req.body;
         if (email) {
-            const existingCoupon = await UserCoupon.findOne({ assignedTo: email });
+            const existingCoupon = await UserCoupon.find({ assignedTo: email });
 
             if (!existingCoupon) {
                 const currentDate = new Date();

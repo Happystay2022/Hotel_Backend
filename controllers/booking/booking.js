@@ -2,11 +2,12 @@ const bookingModel = require("../../models/booking/booking");
 const hotelModel = require("../../models/hotel/basicDetails");
 const userModel = require("../../models/user");
 const { sendBookingConfirmationMail, sendThankYouForVisitMail, sendBookingCancellationMail } = require("../../nodemailer/nodemailer");
+const { getGSTData } = require("../GST/gst");
 //==========================================creating booking========================================================================================================
 const createBooking = async (req, res) => {
   try {
     const { userId, hotelId } = req.params;
-    const {
+    let {
       checkInDate,
       checkOutDate,
       guests,
@@ -29,26 +30,23 @@ const createBooking = async (req, res) => {
       hotelOwnerName,
       destination,
     } = req.body;
-
-    // Fetch user details based on userId
     const user = await userModel.findOne({ userId: userId });
-
     if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
     }
-
-    // Generate a random bookingId
     const bookingId = [...Array(10)]
       .map(() => {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
         return chars.charAt(Math.floor(Math.random() * chars.length));
       })
       .join('');
-
-
-    // Create the booking object
+    const roomPrice = roomDetails.reduce((sum, room) => sum + room.price, 0)
+    const getGstData = await getGSTData({ type: "Hotel", gstThreshold: price })
+    const calculatedGst = getGstData.gstPrice
+    const gstAmount = (roomPrice * calculatedGst) / 100;
+    const finalPrice = price + gstAmount;
     const booking = new bookingModel({
       bookingId,
       user: {
@@ -74,11 +72,11 @@ const createBooking = async (req, res) => {
       },
       foodDetails,
       numRooms,
-      gstPrice,
+      gstPrice:calculatedGst,
       checkInDate,
       checkOutDate,
       guests,
-      price,
+      price:finalPrice,
       couponCode,
       discountPrice,
       pm,
