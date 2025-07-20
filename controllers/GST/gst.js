@@ -63,7 +63,7 @@ exports.getGST = async (req, res) => {
     const gst = await GST.findOne(filter);
 
     if (!gst) {
-      return res.status(404).json({ message: "GST entry not found" });
+      return res.status(404).json(0);
     }
 
     return res.status(200).json(gst);

@@ -44,7 +44,11 @@ const createBooking = async (req, res) => {
       .join('');
     const roomPrice = roomDetails.reduce((sum, room) => sum + room.price, 0)
     const getGstData = await getGSTData({ type: "Hotel", gstThreshold: price })
-    const calculatedGst = getGstData.gstPrice
+    console.log("getGstData", getGstData);
+    let calculatedGst = getGstData?.gstPrice
+    if(calculatedGst === undefined || calculatedGst === null) {
+      calculatedGst = gstPrice || 0; // Fallback to provided gstPrice if getGstData is not found
+    }
     const gstAmount = (roomPrice * calculatedGst) / 100;
     const finalPrice = price + gstAmount;
     const booking = new bookingModel({

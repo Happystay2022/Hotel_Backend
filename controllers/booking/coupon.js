@@ -118,7 +118,7 @@ const deleteCouponAutomatically = async () => {
     const formattedIST = currentIST.format("YYYY-MM-DDTHH:mm:ss.SSSZ");
     const utcFormatted = formattedIST.slice(0, -6) + "+00:00";
 
-    const result = await couponModel.deleteMany({
+    const result = await couponModel?.deleteMany({
       expired: false,
       validity: { $lte: utcFormatted },
     });
