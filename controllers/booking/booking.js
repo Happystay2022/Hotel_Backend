@@ -30,27 +30,52 @@ const createBooking = async (req, res) => {
       hotelOwnerName,
       destination,
     } = req.body;
+
     const user = await userModel.findOne({ userId: userId });
     if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
     }
+
     const bookingId = [...Array(10)]
       .map(() => {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
         return chars.charAt(Math.floor(Math.random() * chars.length));
       })
       .join('');
-    const roomPrice = roomDetails.reduce((sum, room) => sum + room.price, 0)
-    const getGstData = await getGSTData({ type: "Hotel", gstThreshold: price })
-    console.log("getGstData", getGstData);
-    let calculatedGst = getGstData?.gstPrice
-    if(calculatedGst === undefined || calculatedGst === null) {
-      calculatedGst = gstPrice || 0; // Fallback to provided gstPrice if getGstData is not found
+
+    // ✅ GST FIX STARTS HERE
+    const roomPrice = roomDetails.reduce((sum, room) => sum + room.price, 0);
+    const sampleRoomPrice = roomDetails?.[0]?.price || 0;
+
+    const getGstData = await getGSTData({
+      type: "Hotel",
+      gstThreshold: [sampleRoomPrice],
+    });
+
+    let calculatedGst = getGstData?.gstPrice;
+    const nights = Math.max(
+      1,
+      Math.ceil(
+        (new Date(checkOutDate) - new Date(checkInDate)) /
+          (1000 * 60 * 60 * 24)
+      )
+    );
+
+    const totalBookingBaseAmount = roomPrice * numRooms * nights;
+
+    let gstAmount = 0;
+    let finalPrice = totalBookingBaseAmount;
+
+    if (calculatedGst !== undefined && calculatedGst !== null) {
+      gstAmount = (totalBookingBaseAmount * calculatedGst) / 100;
+      finalPrice += gstAmount;
+    } else {
+      calculatedGst = gstPrice || 0;
     }
-    const gstAmount = (roomPrice * calculatedGst) / 100;
-    const finalPrice = price + gstAmount;
+    // ✅ GST FIX ENDS HERE
+
     const booking = new bookingModel({
       bookingId,
       user: {
@@ -62,10 +87,10 @@ const createBooking = async (req, res) => {
       },
       createdBy: createdBy
         ? {
-          user: createdBy.user,
-          email: createdBy.email,
-        }
-        : undefined, // or leave it out completely if not needed
+            user: createdBy.user,
+            email: createdBy.email,
+          }
+        : undefined,
       hotelDetails: {
         hotelCity,
         hotelId,
@@ -76,11 +101,11 @@ const createBooking = async (req, res) => {
       },
       foodDetails,
       numRooms,
-      gstPrice:calculatedGst,
+      gstPrice: calculatedGst,
       checkInDate,
       checkOutDate,
       guests,
-      price:finalPrice,
+      price: finalPrice,
       couponCode,
       discountPrice,
       pm,
@@ -91,8 +116,10 @@ const createBooking = async (req, res) => {
       destination,
       roomDetails,
     });
+
     // Save the booking
     const savedBooking = await booking.save();
+
     await sendBookingConfirmationMail({
       email: booking?.user?.email,
       subject: "Booking Confirmation",
@@ -107,6 +134,7 @@ const createBooking = async (req, res) => {
         { $inc: { "rooms.$.countRooms": -1 } }
       );
     }
+
     res.status(201).json({ success: true, data: savedBooking });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
