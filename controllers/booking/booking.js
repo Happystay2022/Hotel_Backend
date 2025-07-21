@@ -14,12 +14,10 @@ const createBooking = async (req, res) => {
       numRooms,
       foodDetails,
       roomDetails,
-      price,
       pm,
       isPartialBooking,
       partialAmount,
       bookingStatus,
-      gstPrice,
       createdBy,
       couponCode,
       discountPrice,
@@ -31,11 +29,9 @@ const createBooking = async (req, res) => {
       destination,
     } = req.body;
 
-    const user = await userModel.findOne({ userId: userId });
+    const user = await userModel.findOne({ userId });
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
     const bookingId = [...Array(10)]
@@ -45,36 +41,30 @@ const createBooking = async (req, res) => {
       })
       .join('');
 
-    // ✅ GST FIX STARTS HERE
-    const roomPrice = roomDetails.reduce((sum, room) => sum + room.price, 0);
-    const sampleRoomPrice = roomDetails?.[0]?.price || 0;
-
-    const getGstData = await getGSTData({
-      type: "Hotel",
-      gstThreshold: [sampleRoomPrice],
-    });
-
-    let calculatedGst = getGstData?.gstPrice;
     const nights = Math.max(
       1,
-      Math.ceil(
-        (new Date(checkOutDate) - new Date(checkInDate)) /
-          (1000 * 60 * 60 * 24)
-      )
+      Math.ceil((new Date(checkOutDate) - new Date(checkInDate)) / (1000 * 60 * 60 * 24))
     );
 
-    const totalBookingBaseAmount = roomPrice * numRooms * nights;
-
-    let gstAmount = 0;
-    let finalPrice = totalBookingBaseAmount;
-
-    if (calculatedGst !== undefined && calculatedGst !== null) {
-      gstAmount = (totalBookingBaseAmount * calculatedGst) / 100;
-      finalPrice += gstAmount;
-    } else {
-      calculatedGst = gstPrice || 0;
+    let perRoomPrice = roomDetails?.[0]?.price || 0;
+    const roomBaseTotal = perRoomPrice * numRooms * nights;
+    if (discountPrice > 0 && couponCode) {
+      perRoomPrice = perRoomPrice - discountPrice;
     }
-    // ✅ GST FIX ENDS HERE
+    const gstData = await getGSTData({
+      type: "Hotel",
+      gstThreshold: [perRoomPrice],
+    });
+
+    const gstRate = gstData?.gstPrice || 0;
+    const gstAmount = (roomBaseTotal * gstRate) / 100;
+
+    const foodPrice = (foodDetails || []).reduce((sum, food) => {
+      return sum + (food.price || 0) * (food.quantity || 1);
+    }, 0);
+
+    
+    const finalPrice = Math.max(0, roomBaseTotal + gstAmount + foodPrice - discountPrice);
 
     const booking = new bookingModel({
       bookingId,
@@ -87,9 +77,9 @@ const createBooking = async (req, res) => {
       },
       createdBy: createdBy
         ? {
-            user: createdBy.user,
-            email: createdBy.email,
-          }
+          user: createdBy.user,
+          email: createdBy.email,
+        }
         : undefined,
       hotelDetails: {
         hotelCity,
@@ -101,7 +91,10 @@ const createBooking = async (req, res) => {
       },
       foodDetails,
       numRooms,
-      gstPrice: calculatedGst,
+      gstPrice: gstRate,
+      gstAmount,
+      foodPrice,
+      baseRoomPrice: roomBaseTotal,
       checkInDate,
       checkOutDate,
       guests,
@@ -117,7 +110,6 @@ const createBooking = async (req, res) => {
       roomDetails,
     });
 
-    // Save the booking
     const savedBooking = await booking.save();
 
     await sendBookingConfirmationMail({
@@ -142,6 +134,28 @@ const createBooking = async (req, res) => {
 };
 
 
+
+// const createBooking = async (req, res) => {
+//   try {
+//     const { userId, hotelId } = req.params;
+//     const { ...data } = req.body;
+//     const user = await userModel.findOne({ userId });
+//     if (!user) {
+//       return res.status(404).json({ success: false, message: "User not found" });
+//     }
+//     const bookingId = [...Array(10)]
+//       .map(() => {
+//         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+//         return chars.charAt(Math.floor(Math.random() * chars.length));
+//       })
+//       .join('');
+
+//   }
+//   catch (error) {
+//     console.error("Error creating booking:", error);
+//     res.status(500).json({ success: false, message: "Internal Server Error" });
+//   }
+// }
 
 const getBookingCounts = async function (req, res) {
   const getCount = await bookingModel.countDocuments({});
