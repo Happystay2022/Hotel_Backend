@@ -134,29 +134,6 @@ const createBooking = async (req, res) => {
 };
 
 
-
-// const createBooking = async (req, res) => {
-//   try {
-//     const { userId, hotelId } = req.params;
-//     const { ...data } = req.body;
-//     const user = await userModel.findOne({ userId });
-//     if (!user) {
-//       return res.status(404).json({ success: false, message: "User not found" });
-//     }
-//     const bookingId = [...Array(10)]
-//       .map(() => {
-//         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-//         return chars.charAt(Math.floor(Math.random() * chars.length));
-//       })
-//       .join('');
-
-//   }
-//   catch (error) {
-//     console.error("Error creating booking:", error);
-//     res.status(500).json({ success: false, message: "Internal Server Error" });
-//   }
-// }
-
 const getBookingCounts = async function (req, res) {
   const getCount = await bookingModel.countDocuments({});
   res.json(getCount);
