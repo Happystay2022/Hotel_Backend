@@ -3,29 +3,27 @@ const carOwner = require("../../models/travel/carOwner");
 const Car = require("../../models/travel/cars");
 const { default: mongoose } = require("mongoose");
 const { getGSTData } = require("../GST/gst");
+const { sendCustomEmail } = require("../../nodemailer/nodemailer");
 
 exports.bookCar = async (req, res) => {
   try {
-    const { seats, carId, bookedBy, customerMobile } = req.body;
+    const { seats, carId, bookedBy, customerMobile, customerEmail } = req.body;
 
     if (!seats || !Array.isArray(seats) || seats.length === 0) {
       return res.status(400).json({ message: "No seats selected" });
     }
-
     const car = await Car.findById(carId);
     if (!car) return res.status(404).json({ message: "Car not found" });
-
     const bookedSeatIds = [];
     const selectedSeats = [];
-
     for (const seatId of seats) {
       const seat = car.seatConfig.find((s) => s._id.toString() === seatId);
-      if (!seat)
+      if (!seat) {
         return res.status(404).json({ message: `Seat ${seatId} not found` });
-      if (seat.isBooked)
-        return res
-          .status(400)
-          .json({ message: `Seat ${seatId} is already booked` });
+      }
+      if (seat.isBooked) {
+        return res.status(400).json({ message: `Seat ${seatId} is already booked` });
+      }
 
       seat.isBooked = true;
       seat.bookedBy = bookedBy;
@@ -33,13 +31,13 @@ exports.bookCar = async (req, res) => {
       selectedSeats.push(seat);
     }
 
-    // Calculate total seat price
+    // Calculate total price
     const totalSeatPrice = selectedSeats.reduce(
       (sum, seat) => sum + seat.seatPrice,
-      0,
+      0
     );
 
-    // Calculate GST
+    // Get GST info
     const gstData = await getGSTData({
       type: "Travel",
       gstThreshold: totalSeatPrice,
@@ -49,7 +47,7 @@ exports.bookCar = async (req, res) => {
     const gstAmount = (totalSeatPrice * gstRate) / 100;
     const finalPrice = totalSeatPrice + gstAmount;
 
-    // Save updated seat bookings
+    // Save updated car with booked seats
     await car.save();
 
     // Create booking
@@ -59,7 +57,9 @@ exports.bookCar = async (req, res) => {
       bookedBy,
       price: finalPrice,
       gstPrice: gstRate,
+      gstAmount,
       customerMobile,
+      customerEmail,
       pickupP: car.pickupP,
       dropP: car.dropP,
       pickupD: car.pickupD,
@@ -67,7 +67,19 @@ exports.bookCar = async (req, res) => {
       vehicleNumber: car.vehicleNumber,
     });
 
-    return res.status(201).json(newBooking);
+    // Send email
+    await sendCustomEmail({
+      email: customerEmail,
+      subject: `Your Travel Booking is Confirmed`,
+      message: `Your booking (ID: ${newBooking.bookingId}) has been confirmed. Vehicle Number: ${car.vehicleNumber}.`,
+      link: process.env.FRONTEND_URL,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Booking successful",
+      data: newBooking,
+    });
   } catch (error) {
     console.error("Booking error:", error);
     return res.status(500).json({
@@ -76,6 +88,7 @@ exports.bookCar = async (req, res) => {
     });
   }
 };
+
 
 exports.getTravelBookings = async (req, res) => {
   try {

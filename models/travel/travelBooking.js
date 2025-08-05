@@ -52,6 +52,10 @@ const travelBookingSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  customerEmail: {
+    type: String,
+    required: true,
+  },
   bookingDate: {
     type: Date,
     default: Date.now,

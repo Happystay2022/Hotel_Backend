@@ -121,11 +121,26 @@ const createBooking = async (req, res) => {
 
     for (const bookedRoom of roomDetails) {
       const { roomId } = bookedRoom;
-      await hotelModel.updateOne(
-        { hotelId: hotelId, "rooms.roomId": roomId },
-        { $inc: { "rooms.$.countRooms": -1 } }
-      );
+    
+      const hotel = await hotelModel.findOne({
+        hotelId: hotelId,
+        "rooms.roomId": roomId,
+      });
+    
+      const roomIndex = hotel?.rooms?.findIndex((r) => r.roomId === roomId);
+    
+      if (
+        hotel &&
+        roomIndex !== -1 &&
+        hotel.rooms[roomIndex].countRooms > 0
+      ) {
+        await hotelModel.updateOne(
+          { hotelId: hotelId, "rooms.roomId": roomId },
+          { $inc: { "rooms.$.countRooms": -1 } }
+        );
+      }
     }
+    
 
     res.status(201).json({ success: true, data: savedBooking });
   } catch (error) {
@@ -212,7 +227,14 @@ const updateBooking = async (req, res) => {
         link: process.env.FRONTEND_URL,
       });
     }
-
+    if (updatedData.bookingStatus === "Confirmed") {
+      await sendBookingConfirmationMail({
+        email: updatedData?.user?.email,
+        subject: "Booking Confirmed !",
+        bookingData: updatedData,
+        link: process.env.FRONTEND_URL,
+      });
+    }
     res.json(updatedData);
   } catch (error) {
     console.error(error);
