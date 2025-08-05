@@ -1,9 +1,30 @@
 const mongoose = require("mongoose");
+
 const generateComplaintId = () => {
   const min = 10000000; // Minimum 8-digit number
   const max = 99999999; // Maximum 8-digit number
   return Math.floor(Math.random() * (max - min + 1)) + min;
 };
+
+// Sub-schema for update history
+const updateHistorySchema = new mongoose.Schema(
+  {
+    name: String,
+    email: String,
+    status: {
+      type: String,
+      enum: ["Pending", "Approved", "Rejected", "Resolved", "Working"],
+    },
+    feedBack: String,
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false } // Avoid creating _id for each sub-document
+);
+
+// Main Complaint schema
 const complaintSchema = new mongoose.Schema(
   {
     userId: {
@@ -27,7 +48,7 @@ const complaintSchema = new mongoose.Schema(
     },
     hotelName: String,
     bookingId: String,
-    feedBack: String,
+    feedBack: String, // Latest feedback (optional, for convenience)
     images: [String],
     status: {
       type: String,
@@ -35,17 +56,14 @@ const complaintSchema = new mongoose.Schema(
       enum: ["Pending", "Approved", "Rejected", "Resolved", "Working"],
       default: "Pending",
     },
-    updatedBy: {
-      name: String,
-      email: String,
-    },
+    updatedBy: [updateHistorySchema], // Timeline of updates
     issue: {
       type: String,
       required: true,
     },
   },
   {
-    timestamps: true, // Correct option for automatically managing createdAt and updatedAt fields
+    timestamps: true, // adds createdAt and updatedAt
   }
 );
 

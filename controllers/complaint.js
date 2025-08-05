@@ -44,27 +44,48 @@ const createComplaint = async (req, res) => {
 //=============================================================================================
 //not===========
 const approveComplaint = async (req, res) => {
-    const { id } = req.params; // id should be the complaint's identifier
-    const { status, feedBack, updatedBy } = req.body; // Extract updatedBy from request body
-
+    const { id } = req.params;
+    const { status, feedBack, updatedBy } = req.body;
+  
     try {
-        if (!id) {
-            return res.status(400).json({ success: false, message: 'Complaint ID is required' });
-        }
-
-        // Update the complaint, including status, feedback, and updatedBy
-        const updatedComplaint = await Complaint.findByIdAndUpdate(id, { status, feedBack, updatedBy }, { new: true, runValidators: true });
-
-        if (!updatedComplaint) {
-            return res.status(404).json({ success: false, message: 'Complaint not found' });
-        }
-
-        return res.status(200).json({ success: true, updatedComplaint });
+      if (!id) {
+        return res.status(400).json({ success: false, message: 'Complaint ID is required' });
+      }
+  
+      if (!updatedBy?.name || !updatedBy?.email) {
+        return res.status(400).json({ success: false, message: 'UpdatedBy must include name and email' });
+      }
+  
+      // Create new update object with timestamp
+      const newUpdate = {
+        name: updatedBy.name,
+        email: updatedBy.email,
+        feedBack: feedBack || '', // Default to empty string if no feedback provided
+        status,
+        updatedAt: new Date(), // Track when the update happened
+      };
+  
+      const updatedComplaint = await Complaint.findByIdAndUpdate(
+        id,
+        {
+          $set: { status, feedBack },      // Update status and feedback
+          $push: { updatedBy: newUpdate }, // Append to update history
+        },
+        { new: true, runValidators: true }
+      );
+  
+      if (!updatedComplaint) {
+        return res.status(404).json({ success: false, message: 'Complaint not found' });
+      }
+  
+      return res.status(200).json({ success: true, updatedComplaint });
+  
     } catch (error) {
-        console.error(error); // Log the error for debugging
-        return res.status(500).json({ success: false, message: 'Server error' });
+      console.error("Error updating complaint:", error);
+      return res.status(500).json({ success: false, message: 'Server error' });
     }
-};
+  };
+  
 
 //=============================================================================================
 const getComplaintsByUserId = async (req, res) => {
