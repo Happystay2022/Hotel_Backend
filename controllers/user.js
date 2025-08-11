@@ -9,9 +9,9 @@ const createSignup = async function (req, res) {
     try {
         const { email, mobile } = req.body;
         if (email) {
-            const existingCoupon = await UserCoupon.find({ assignedTo: email });
+           const existingCoupon = await UserCoupon.find({ assignedTo: email });
 
-            if (!existingCoupon) {
+            if (existingCoupon.length === 0) {
                 const currentDate = new Date();
                 const validity = new Date(currentDate.setDate(currentDate.getDate() + 7)); // 7-day validity
 
@@ -89,7 +89,7 @@ const GoogleSignIn = async function (req, res) {
         if (email) {
             const existingCoupon = await UserCoupon.find({ assignedTo: email });
 
-            if (!existingCoupon) {
+            if (existingCoupon.length === 0) {
                 const currentDate = new Date();
                 const validity = new Date(currentDate.setDate(currentDate.getDate() + 7)); // 7-day validity
 
@@ -101,6 +101,7 @@ const GoogleSignIn = async function (req, res) {
                     assignedTo: email,
                 });
             }
+
         }
         // Check if the user already exists based on email or UID
         const existingUser = await userModel.findOne({ $or: [{ email }, { uid }] });
@@ -150,7 +151,7 @@ const signIn = async function (req, res) {
         const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
         // Return success response with token
-        res.status(200).json({ message: 'Sign-in successful', userId: user.userId, mobile:user.mobile,email:user.email, rsToken: token });
+        res.status(200).json({ message: 'Sign-in successful', userId: user.userId, mobile: user.mobile, email: user.email, rsToken: token });
     } catch (error) {
         console.error('Sign-in error:', error);
         res.status(500).json({ message: 'Internal server error' });
