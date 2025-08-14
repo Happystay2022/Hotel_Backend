@@ -149,15 +149,9 @@ const deleteHotelImages = async function (req, res) {
   }
 
   try {
-    // Decode URL to handle special characters
-    imageUrl = decodeURIComponent(imageUrl).trim();
-
-    // Find and update in one go
+   
     const hotel = await hotelModel.findOneAndUpdate(
-      { hotelId, images: imageUrl }, // ensure image exists
-      { $pull: { images: imageUrl } }, // remove exact match
-      { new: true }
-    );
+      { hotelId, images: imageUrl },)  
 
     if (!hotel) {
       return res
