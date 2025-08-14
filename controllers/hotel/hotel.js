@@ -142,39 +142,39 @@ const updateHotelImage = async (req, res) => {
 //======================================Delete hotel images=======================
 const deleteHotelImages = async function (req, res) {
   const { hotelId } = req.params;
-  const { imageUrl } = req.query;
+  let { imageUrl } = req.query;
 
   if (!imageUrl) {
     return res.status(400).json({ message: "Image URL is required" });
   }
 
   try {
-    // Find the hotel by ID
-    const hotel = await hotelModel.findOne({ hotelId });
+    // Decode URL to handle special characters
+    imageUrl = decodeURIComponent(imageUrl).trim();
+
+    // Find and update in one go
+    const hotel = await hotelModel.findOneAndUpdate(
+      { hotelId, images: imageUrl }, // ensure image exists
+      { $pull: { images: imageUrl } }, // remove exact match
+      { new: true }
+    );
 
     if (!hotel) {
-      return res.status(404).json({ message: "Hotel not found" });
-    }
-
-    // Check if the image URL exists in the array
-    if (!hotel.images.includes(imageUrl)) {
       return res
         .status(404)
-        .json({ message: "Image URL not found in the images array" });
+        .json({ message: "Hotel or Image URL not found" });
     }
 
-    // Remove the image URL from the array
-    hotel.images = hotel.images.filter((image) => image !== imageUrl);
-
-    // Save the updated hotel document
-    await hotel.save();
-
-    res.status(200).json({ message: "Image URL deleted successfully", hotel });
+    res.status(200).json({
+      message: "Image URL deleted successfully",
+      hotel
+    });
   } catch (error) {
-    console.error(error);
+    console.error("Error deleting image:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
 //==================================UpdateHotel================================
 const UpdateHotelStatus = async function (req, res) {
   const { hotelId } = req.params;
