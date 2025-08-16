@@ -6,9 +6,6 @@ const numCPUs = os.cpus().length;
 const USE_CLUSTER = true;
 
 if (USE_CLUSTER && cluster.isMaster) {
-    console.log(`Master ${process.pid} is running`);
-    console.log(`Starting ${numCPUs} workers...`);
-
     // Fork workers
     for (let i = 0; i < numCPUs; i++) {
         cluster.fork();
@@ -16,7 +13,6 @@ if (USE_CLUSTER && cluster.isMaster) {
 
     // Restart any worker that dies
     cluster.on('exit', (worker) => {
-        console.log(`Worker ${worker.process.pid} died. Starting a new one...`);
         cluster.fork();
     });
 
@@ -53,7 +49,6 @@ if (USE_CLUSTER && cluster.isMaster) {
         const start = Date.now();
         res.on('finish', () => {
             const duration = Date.now() - start;
-            console.log(`[PID ${process.pid}] ${req.method} ${req.originalUrl} - ${duration}ms`);
         });
         next();
     });
