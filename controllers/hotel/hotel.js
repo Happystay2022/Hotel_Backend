@@ -82,6 +82,31 @@ const createHotel = async (req, res) => {
   }
 };
 
+
+const updatePolicies = async (req, res) => {
+  const { hotelId } = req.params;
+  const { policies } = req.body;
+
+  if (!policies || !Array.isArray(policies)) {
+    return res.status(400).json({ message: 'Policies must be provided as an array' });
+  }
+
+  try {
+    const updatedHotel = await hotelModel.findOneAndUpdate(
+      { hotelId },
+      { $set: { policies } },
+      { new: true }
+    );
+
+    if (!updatedHotel) {
+      return res.status(404).json({ message: 'Hotel not found' });
+    }
+
+    return res.json({ message: 'Policies updated successfully', policies: updatedHotel.policies });
+  } catch (error) {
+    return res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
 //=================================Count of hotel=============================
 const getCount = async function (req, res) {
   try {
@@ -748,6 +773,7 @@ module.exports = {
   getHotelsCityByState,
   monthlyPrice,
   getCount,
+  updatePolicies,
   getCouponsAppliedHotels,
   getCountPendingHotels,
   updateHotelImage,

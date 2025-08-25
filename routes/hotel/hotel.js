@@ -23,6 +23,7 @@ router.get('/get-hotels/count', hotelController.getCount);
 router.get("/get-hotel-list/filter-by-applied-coupons",hotelController.getCouponsAppliedHotels) // on admin panel
 router.get('/get-pending-hotels/count', hotelController.getCountPendingHotels);
 router.patch('/update-hotels-image-by-hotel-id/:hotelId', upload, hotelController.updateHotelImage); // on panel
+router.patch('/update-hotels-policy-by-hotel-id/:hotelId', hotelController.updatePolicies); // on panel
 router.delete('/hotels/:hotelId/images/imageUrl', hotelController.deleteHotelImages); // on panel
 router.put('/change-monthly-price/hotel-room', hotelController.monthlyPrice);
 
