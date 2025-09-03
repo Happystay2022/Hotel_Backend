@@ -3,7 +3,7 @@ const os = require('os');
 const numCPUs = os.cpus().length;
 
 // Change to false to run without cluster for testing
-const USE_CLUSTER = true;
+const USE_CLUSTER = false;
 
 if (USE_CLUSTER && cluster.isMaster) {
     // Fork workers
