@@ -2,6 +2,7 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 require('dotenv').config();
 const { format } = require("date-fns");
+const user = require('../models/user');
 
 const transporter = nodemailer.createTransport({
     host: "smtp.hostinger.com",
@@ -18,6 +19,10 @@ const generateOtp = () => {
 };
 
 const sendOtpEmail = async (email, otp) => {
+    const matchEmail = await user.findOne({ email: { $regex: new RegExp(email, "i") } });
+    if (!matchEmail) {
+        throw new Error('Email not registered. Please sign up first.');
+    }
     const currentYear = new Date().getFullYear();
     const mailOptions = {
         from: `"HRS (HotelRoomsstay)" <${process.env.NODEMAILER_EMAIL}>`,
