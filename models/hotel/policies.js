@@ -16,7 +16,7 @@ const policies = new mongoose.Schema({
   alcoholAllowed: String,
   unmarriedCouplesAllowed: String,
   internationalGuestAllowed: String,
-  returnPolicy: String,
+  refundPolicy: String,
   onDoubleSharing: String,
   onQuadSharing: String,
   onBulkBooking: String,
