@@ -18,7 +18,7 @@ const carSchema = new Schema({
   },
   vehicleType: {
     type: String,
-    enum: ["Bike", "Cab", "Bus"],
+    enum: ["Bike", "Car", "Bus"],
     required: true,
   },
   sharingType: {
