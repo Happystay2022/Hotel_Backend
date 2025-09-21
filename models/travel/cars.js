@@ -16,6 +16,16 @@ const carSchema = new Schema({
   vehicleNumber: {
     type: String,
   },
+  vehicleType: {
+    type: String,
+    enum: ["Bike", "Cab", "Bus"],
+    required: true,
+  },
+  sharingType: {
+    type: String,
+    enum: ["Private", "Shared"],
+    required: true,
+  },
   images: {
     type: [String],
     default: [],
