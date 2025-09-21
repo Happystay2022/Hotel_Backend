@@ -89,6 +89,16 @@ const carSchema = new Schema({
     required: true,
     min: 0,
   },
+  vehiclyType: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  sharingType: {
+    type: String,
+    required: true,
+    trim: true,
+  },
   color: {
     type: String,
     required: true,
