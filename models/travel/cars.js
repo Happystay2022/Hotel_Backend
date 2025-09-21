@@ -89,7 +89,7 @@ const carSchema = new Schema({
     required: true,
     min: 0,
   },
-  vehiclyType: {
+  vehicleType: {
     type: String,
     required: true,
     trim: true,
