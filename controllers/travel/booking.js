@@ -7,37 +7,70 @@ const { sendCustomEmail } = require("../../nodemailer/nodemailer");
 
 exports.bookCar = async (req, res) => {
   try {
-    const { seats, carId, bookedBy, customerMobile, customerEmail } = req.body;
+    const {
+      seats,
+      sharingType,
+      vehicleType,
+      carId,
+      bookedBy,
+      customerMobile,
+      customerEmail,
+    } = req.body;
 
-    if (!seats || !Array.isArray(seats) || seats.length === 0) {
-      return res.status(400).json({ message: "No seats selected" });
-    }
     const car = await Car.findById(carId);
     if (!car) return res.status(404).json({ message: "Car not found" });
-    const bookedSeatIds = [];
-    const selectedSeats = [];
-    for (const seatId of seats) {
-      const seat = car.seatConfig.find((s) => s._id.toString() === seatId);
-      if (!seat) {
-        return res.status(404).json({ message: `Seat ${seatId} not found` });
+
+    let totalSeatPrice;
+    let bookedSeatIds = [];
+
+    if (sharingType === "Private") {
+      if (!car.isAvailable) {
+        return res
+          .status(400)
+          .json({ message: "Car is not available for private booking" });
       }
-      if (seat.isBooked) {
-        return res.status(400).json({ message: `Seat ${seatId} is already booked` });
+      totalSeatPrice = car.price;
+
+      car.seatConfig.forEach((seat) => {
+        seat.isBooked = true;
+        seat.bookedBy = bookedBy;
+        bookedSeatIds.push(seat._id);
+      });
+
+      car.isAvailable = false;
+      car.runningStatus = "On A Trip";
+    } else {
+      // Shared booking
+      if (!seats || !Array.isArray(seats) || seats.length === 0) {
+        return res
+          .status(400)
+          .json({ message: "No seats selected for shared booking" });
       }
 
-      seat.isBooked = true;
-      seat.bookedBy = bookedBy;
-      bookedSeatIds.push(seat._id);
-      selectedSeats.push(seat);
+      const selectedSeats = [];
+      for (const seatId of seats) {
+        const seat = car.seatConfig.find((s) => s._id.toString() === seatId);
+        if (!seat) {
+          return res.status(404).json({ message: `Seat ${seatId} not found` });
+        }
+        if (seat.isBooked) {
+          return res
+            .status(400)
+            .json({ message: `Seat ${seat.seatNumber || seatId} is already booked` });
+        }
+
+        seat.isBooked = true;
+        seat.bookedBy = bookedBy;
+        bookedSeatIds.push(seat._id);
+        selectedSeats.push(seat);
+      }
+
+      totalSeatPrice = selectedSeats.reduce(
+        (sum, seat) => sum + seat.seatPrice,
+        0,
+      );
     }
 
-    // Calculate total price
-    const totalSeatPrice = selectedSeats.reduce(
-      (sum, seat) => sum + seat.seatPrice,
-      0
-    );
-
-    // Get GST info
     const gstData = await getGSTData({
       type: "Travel",
       gstThreshold: totalSeatPrice,
@@ -47,10 +80,8 @@ exports.bookCar = async (req, res) => {
     const gstAmount = (totalSeatPrice * gstRate) / 100;
     const finalPrice = totalSeatPrice + gstAmount;
 
-    // Save updated car with booked seats
     await car.save();
 
-    // Create booking
     const newBooking = await TravelBooking.create({
       carId: car._id,
       seats: bookedSeatIds,
@@ -58,6 +89,8 @@ exports.bookCar = async (req, res) => {
       price: finalPrice,
       gstPrice: gstRate,
       gstAmount,
+      sharingType,
+      vehicleType,
       customerMobile,
       customerEmail,
       pickupP: car.pickupP,
@@ -67,7 +100,6 @@ exports.bookCar = async (req, res) => {
       vehicleNumber: car.vehicleNumber,
     });
 
-    // Send email
     await sendCustomEmail({
       email: customerEmail,
       subject: `Your Travel Booking is Confirmed`,
