@@ -190,6 +190,7 @@ const signIn = async function (req, res) {
       message: "Sign-in successful",
       userId: user.userId,
       mobile: user.mobile,
+      name: user.userName,
       email: user.email,
       rsToken: token,
     });
