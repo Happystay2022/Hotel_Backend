@@ -102,6 +102,8 @@ const GoogleSignIn = async function (req, res) {
         message: "User already exists",
         userId: existingUser.userId,
         mobile: existingUser.mobile,
+        name: existingUser.userName,
+        email: existingUser.email,
         rsToken: token,
       });
     }
