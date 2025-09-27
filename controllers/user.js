@@ -118,6 +118,7 @@ const GoogleSignIn = async function (req, res) {
     res.status(201).json({
       message: "Sign-in successful",
       userId: user.userId,
+      name: user.userName,
       rsToken: token,
     });
   } catch (error) {
