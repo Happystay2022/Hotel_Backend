@@ -254,32 +254,57 @@ exports.getBookingsOfOwner = async (req, res) => {
 
 exports.getBookingBookedBy = async (req, res) => {
   try {
-    const { bookedBy } = req.body;
+    const { customerMobile } = req.body; // mobile no. from request
 
-    const bookings = await TravelBooking.find({ bookedBy: bookedBy });
-      const carIds = bookings.map((booking) => booking.carId);
+    // 1. Customer ke bookings laiye
+    const bookings = await TravelBooking.find({ customerMobile });
 
+    if (!bookings.length) {
+      return res.status(404).json({ message: "No bookings found" });
+    }
 
-      const cars = await Car.find({ _id: { $in: carIds } });
-      const carMap = {};
+    // 2. Sare booking ke carIds nikal lo
+    const carIds = bookings.map((booking) => booking.carId);
 
-      cars.forEach((car) => {
-        carMap[car._id.toString()] = car;
-      });
+    // 3. Cars find karo
+    const cars = await Car.find({ _id: { $in: carIds } });
 
-      const enrichedBookings = bookings.map((booking) => {
-        const car = carMap[booking.carId.toString()];
-        return {
-          ...booking.toObject(),
-          carDetails: car || null,
-        };
-      });
+    // Car map banalo
+    const carMap = {};
+    cars.forEach((car) => {
+      carMap[car._id.toString()] = car;
+    });
 
-    res.status(200).json(enrichedBookings);
+    // 4. Har booking ke sath car details + filtered seat config add karo
+    const enrichedBookings = bookings.map((booking) => {
+      const car = carMap[booking.carId.toString()];
+      let filteredSeats = [];
+
+      if (car && Array.isArray(car.seatConfig)) {
+        // sirf wahi seats dikhani jo booking.seats me hain
+        filteredSeats = car.seatConfig.filter((seat) =>
+          booking.seats.includes(seat._id.toString())
+        );
+      }
+
+      return {
+        ...booking.toObject(),
+        carDetails: car
+          ? {
+              _id: car._id,
+              name: car.name, // ya jo bhi fields chahiye car ki
+              bookedSeats: filteredSeats, // sirf booked seats ka detail
+            }
+          : null,
+      };
+    });
+
+    return res.status(200).json(enrichedBookings);
   } catch (error) {
     console.error("Error fetching booking data:", error);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
+
 
 

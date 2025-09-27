@@ -6,6 +6,6 @@ router.post("/create-travel/booking", bookCar);
 router.get('/get-travels-bookings', getTravelBookings)
 router.patch('/update-travel/booking',updateBooking)
 router.get("/get-bookings-by/owner/:ownerId",getBookingsOfOwner)
-router.get("/get-bookings-by/bookedBy",getBookingBookedBy);
+router.post("/get-bookings-by/bookedBy",getBookingBookedBy);
 
 module.exports = router;
