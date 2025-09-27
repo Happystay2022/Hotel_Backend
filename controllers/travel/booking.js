@@ -251,3 +251,35 @@ exports.getBookingsOfOwner = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+exports.getBookingBookedBy = async (req, res) => {
+  try {
+    const { bookedBy } = req.body;
+
+    const bookings = await TravelBooking.find({ bookedBy: bookedBy });
+      const carIds = bookings.map((booking) => booking.carId);
+
+
+      const cars = await Car.find({ _id: { $in: carIds } });
+      const carMap = {};
+
+      cars.forEach((car) => {
+        carMap[car._id.toString()] = car;
+      });
+
+      const enrichedBookings = bookings.map((booking) => {
+        const car = carMap[booking.carId.toString()];
+        return {
+          ...booking.toObject(),
+          carDetails: car || null,
+        };
+      });
+
+    res.status(200).json(enrichedBookings);
+  } catch (error) {
+    console.error("Error fetching booking data:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
