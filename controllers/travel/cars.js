@@ -127,8 +127,11 @@ exports.updateCar = async (req, res) => {
         const findCar = await Car.findById(id);
         if (!findCar) return res.status(404).json('Car not found');
         data.images = images.length > 0 ? images : findCar.images;
+        // Update seater to match the number of seats in seatConfig
+        data.seater = findCar.seatConfig.length;
         const updateData = await Car.findByIdAndUpdate(id, { ...data });
         return res.status(200).json({ message: 'Successfully Updated', updateData });
+
     } catch (error) {
         return res.status(500).json('We are working hard to fix this');
     }
