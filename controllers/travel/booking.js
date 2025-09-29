@@ -20,7 +20,7 @@ exports.bookCar = async (req, res) => {
     const car = await Car.findById(carId);
     if (!car) return res.status(404).json({ message: "Car not found" });
 
-    let totalSeatPrice;
+    let totalSeatPrice = 0;
     let bookedSeatIds = [];
 
     if (sharingType === "Private") {
@@ -29,18 +29,20 @@ exports.bookCar = async (req, res) => {
           .status(400)
           .json({ message: "Car is not available for private booking" });
       }
+
       totalSeatPrice = car.price;
 
       car.seatConfig.forEach((seat) => {
-        seat.isBooked = true;
-        seat.bookedBy = bookedBy;
-        bookedSeatIds.push(seat._id);
+        if (!seat.isBooked) {
+          seat.isBooked = true;
+          seat.bookedBy = bookedBy;
+          bookedSeatIds.push(seat._id.toString());
+        }
       });
 
       car.isAvailable = false;
       car.runningStatus = "On A Trip";
     } else {
-      // Shared booking
       if (!seats || !Array.isArray(seats) || seats.length === 0) {
         return res
           .status(400)
@@ -49,7 +51,9 @@ exports.bookCar = async (req, res) => {
 
       const selectedSeats = [];
       for (const seatId of seats) {
-        const seat = car.seatConfig.find((s) => s._id.toString() === seatId);
+        const seat = car.seatConfig.find(
+          (s) => s._id.toString() === seatId.toString()
+        );
         if (!seat) {
           return res.status(404).json({ message: `Seat ${seatId} not found` });
         }
@@ -61,13 +65,13 @@ exports.bookCar = async (req, res) => {
 
         seat.isBooked = true;
         seat.bookedBy = bookedBy;
-        bookedSeatIds.push(seat._id);
+        bookedSeatIds.push(seat._id.toString());
         selectedSeats.push(seat);
       }
 
       totalSeatPrice = selectedSeats.reduce(
-        (sum, seat) => sum + seat.seatPrice,
-        0,
+        (sum, seat) => sum + (seat.seatPrice || car.perPersonCost || 0),
+        0
       );
     }
 
@@ -254,36 +258,34 @@ exports.getBookingsOfOwner = async (req, res) => {
 
 exports.getBookingBookedBy = async (req, res) => {
   try {
-    const { customerMobile } = req.body; // mobile no. from request
+    const { customerMobile } = req.body;
 
-    // 1. Customer ke bookings laiye
     const bookings = await TravelBooking.find({ customerMobile });
-
-    if (!bookings.length) {
+    if (!bookings || bookings.length === 0) {
       return res.status(404).json({ message: "No bookings found" });
     }
 
-    // 2. Sare booking ke carIds nikal lo
-    const carIds = bookings.map((booking) => booking.carId);
-
-    // 3. Cars find karo
+    const carIds = bookings.map((b) => b.carId);
     const cars = await Car.find({ _id: { $in: carIds } });
 
-    // Car map banalo
     const carMap = {};
     cars.forEach((car) => {
-      carMap[car._id.toString()] = car;
+      carMap[String(car._id)] = car;
     });
 
-    // 4. Har booking ke sath car details + filtered seat config add karo
     const enrichedBookings = bookings.map((booking) => {
-      const car = carMap[booking.carId.toString()];
-      let filteredSeats = [];
+      const car = carMap[String(booking.carId)];
+      let bookedSeats = [];
+      let bookingSeatIds = [];
 
       if (car && Array.isArray(car.seatConfig)) {
-        // sirf wahi seats dikhani jo booking.seats me hain
-        filteredSeats = car.seatConfig.filter((seat) =>
-          booking.seats.includes(seat._id.toString())
+        bookingSeatIds = booking.seats.map((s) => String(s).trim());
+        const seatConfigFlat = car.seatConfig.flat();
+        bookedSeats = seatConfigFlat.filter(
+          (seat) =>
+            seat &&
+            seat._id &&
+            bookingSeatIds.includes(String(seat._id).trim())
         );
       }
 
@@ -292,8 +294,14 @@ exports.getBookingBookedBy = async (req, res) => {
         carDetails: car
           ? {
               _id: car._id,
-              name: car.name, // ya jo bhi fields chahiye car ki
-              bookedSeats: filteredSeats, // sirf booked seats ka detail
+              make: car.make,
+              model: car.model,
+              vehicleNumber: car.vehicleNumber,
+              images: car.images,
+              seater: car.seater,
+              sharingType: car.sharingType,
+              vehicleType: car.vehicleType,
+              bookedSeats,
             }
           : null,
       };
