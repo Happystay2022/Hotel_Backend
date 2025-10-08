@@ -64,6 +64,6 @@ const travelBookingSchema = new mongoose.Schema({
   },
 });
 
-const TravelBooking = mongoose.model("TravelBooking", travelBookingSchema);
+const CarBooking = mongoose.model("CarBooking", travelBookingSchema);
 
-module.exports = TravelBooking;
+module.exports = CarBooking;

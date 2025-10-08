@@ -1,4 +1,4 @@
-const TravelBooking = require("../../models/travel/travelBooking");
+const CarBooking = require("../../models/travel/carBooking");
 const carOwner = require("../../models/travel/carOwner");
 const Car = require("../../models/travel/cars");
 const { default: mongoose } = require("mongoose");
@@ -86,7 +86,7 @@ exports.bookCar = async (req, res) => {
 
     await car.save();
 
-    const newBooking = await TravelBooking.create({
+    const newBooking = await CarBooking.create({
       carId: car._id,
       seats: bookedSeatIds,
       bookedBy,
@@ -128,7 +128,7 @@ exports.bookCar = async (req, res) => {
 
 exports.getTravelBookings = async (req, res) => {
   try {
-    const bookings = await TravelBooking.find();
+    const bookings = await CarBooking.find();
 
     const enrichedBookings = await Promise.all(
       bookings.map(async (booking) => {
@@ -178,7 +178,7 @@ exports.updateBooking = async function (req, res) {
     }
 
     // Find the booking document first
-    const booking = await TravelBooking.findOne({ _id: id });
+    const booking = await CarBooking.findOne({ _id: id });
 
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
@@ -212,7 +212,7 @@ exports.getBookingsOfOwner = async (req, res) => {
     const ownerCars = await Car.find({ ownerId: ownerId });
     const carIds = ownerCars.map((car) => car._id);
 
-    const bookings = await TravelBooking.find({ carId: { $in: carIds } });
+    const bookings = await CarBooking.find({ carId: { $in: carIds } });
 
     const enrichedBookings = await Promise.all(
       bookings.map(async (booking) => {
@@ -260,7 +260,7 @@ exports.getBookingBookedBy = async (req, res) => {
   try {
     const { customerMobile } = req.body;
 
-    const bookings = await TravelBooking.find({ customerMobile });
+    const bookings = await CarBooking.find({ customerMobile });
     if (!bookings || bookings.length === 0) {
       return res.status(404).json({ message: "No bookings found" });
     }
