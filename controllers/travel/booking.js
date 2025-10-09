@@ -124,8 +124,18 @@ exports.bookCar = async (req, res) => {
     });
   }
 };
-
-
+exports.changeBookingStatus = async(req,res)=>{
+try {
+  const {bookingStatus} = req.body;
+  const {id} = req.params;
+  const booking = await CarBooking.findById(id);
+  if(!booking) return res.status(404).json({message:"Booking not found"});
+  booking.bookingStatus = bookingStatus;
+  await booking.save();
+} catch (error) {
+  
+}
+}
 exports.getTravelBookings = async (req, res) => {
   try {
     const bookings = await CarBooking.find();
