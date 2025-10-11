@@ -4,149 +4,6 @@ const userModel = require("../../models/user");
 const { sendBookingConfirmationMail, sendThankYouForVisitMail, sendBookingCancellationMail } = require("../../nodemailer/nodemailer");
 const { getGSTData } = require("../GST/gst");
 //==========================================creating booking========================================================================================================
-// const createBooking = async (req, res) => {
-//   try {
-//     const { userId, hotelId } = req.params;
-//     let {
-//       checkInDate,
-//       checkOutDate,
-//       guests,
-//       numRooms,
-//       foodDetails,
-//       roomDetails,
-//       pm,
-//       isPartialBooking,
-//       partialAmount,
-//       bookingStatus,
-//       createdBy,
-//       couponCode,
-//       discountPrice,
-//       bookingSource,
-//       hotelName,
-//       hotelEmail,
-//       hotelCity,
-//       hotelOwnerName,
-//       destination,
-//     } = req.body;
-
-//     const user = await userModel.findOne({ userId });
-//     if (!user) {
-//       return res.status(404).json({ success: false, message: "User not found" });
-//     }
-
-//     const bookingId = [...Array(10)]
-//       .map(() => {
-//         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-//         return chars.charAt(Math.floor(Math.random() * chars.length));
-//       })
-//       .join('');
-
-//     const nights = Math.max(
-//       1,
-//       Math.ceil((new Date(checkOutDate) - new Date(checkInDate)) / (1000 * 60 * 60 * 24))
-//     );
-
-//     let perRoomPrice = roomDetails?.[0]?.price || 0;
-//     const roomBaseTotal = perRoomPrice * numRooms * nights;
-//     if (discountPrice > 0 && couponCode) {
-//       perRoomPrice = perRoomPrice - discountPrice;
-//     }
-//     const gstData = await getGSTData({
-//       type: "Hotel",
-//       gstThreshold: [perRoomPrice],
-//     });
-
-//     const gstRate = gstData?.gstPrice || 0;
-//     const gstAmount = (roomBaseTotal * gstRate) / 100;
-
-//     const foodPrice = (foodDetails || []).reduce((sum, food) => {
-//       return sum + (food.price || 0) * (food.quantity || 1);
-//     }, 0);
-
-    
-//     const finalPrice = Math.max(0, roomBaseTotal + gstAmount + foodPrice - discountPrice);
-
-//     const booking = new bookingModel({
-//       bookingId,
-//       user: {
-//         userId: user.userId,
-//         profile: user.images,
-//         name: user.userName,
-//         email: user.email,
-//         mobile: user.mobile,
-//       },
-//       createdBy: createdBy
-//         ? {
-//           user: createdBy.user,
-//           email: createdBy.email,
-//         }
-//         : undefined,
-//       hotelDetails: {
-//         hotelCity,
-//         hotelId,
-//         hotelName,
-//         hotelEmail,
-//         hotelOwnerName,
-//         destination,
-//       },
-//       foodDetails,
-//       numRooms,
-//       gstPrice: gstRate,
-//       gstAmount,
-//       foodPrice,
-//       baseRoomPrice: roomBaseTotal,
-//       checkInDate,
-//       checkOutDate,
-//       guests,
-//       price: finalPrice,
-//       couponCode,
-//       discountPrice,
-//       pm,
-//       isPartialBooking,
-//       partialAmount,
-//       bookingStatus,
-//       bookingSource,
-//       destination,
-//       roomDetails,
-//     });
-
-//     const savedBooking = await booking.save();
-
-//     await sendBookingConfirmationMail({
-//       email: booking?.user?.email,
-//       subject: "Booking Confirmation",
-//       bookingData: booking,
-//       link: process.env.FRONTEND_URL,
-//     });
-
-//     for (const bookedRoom of roomDetails) {
-//       const { roomId } = bookedRoom;
-    
-//       const hotel = await hotelModel.findOne({
-//         hotelId: hotelId,
-//         "rooms.roomId": roomId,
-//       });
-    
-//       const roomIndex = hotel?.rooms?.findIndex((r) => r.roomId === roomId);
-    
-//       if (
-//         hotel &&
-//         roomIndex !== -1 &&
-//         hotel.rooms[roomIndex].countRooms > 0
-//       ) {
-//         await hotelModel.updateOne(
-//           { hotelId: hotelId, "rooms.roomId": roomId },
-//           { $inc: { "rooms.$.countRooms": -1 } }
-//         );
-//       }
-//     }
-    
-
-//     res.status(201).json({ success: true, data: savedBooking });
-//   } catch (error) {
-//     res.status(500).json({ success: false, error: error.message });
-//   }
-// };
 const createBooking = async (req, res) => {
   try {
     const { userId, hotelId } = req.params;
@@ -189,29 +46,30 @@ const createBooking = async (req, res) => {
       Math.ceil((new Date(checkOutDate) - new Date(checkInDate)) / (1000 * 60 * 60 * 24))
     );
 
+    // Calculate base room price
     let perRoomPrice = roomDetails?.[0]?.price || 0;
-
-    // Apply discount before calculating room total
-    if (discountPrice > 0 && couponCode) {
-      perRoomPrice = perRoomPrice - discountPrice;
-    }
-
     const roomBaseTotal = perRoomPrice * numRooms * nights;
-
+    
+    // Apply discount first
+    const discountAmount = discountPrice || 0;
+    const discountedRoomTotal = Math.max(0, roomBaseTotal - discountAmount);
+    
+    // Calculate GST on discounted amount
     const gstData = await getGSTData({
       type: "Hotel",
-      gstThreshold: [perRoomPrice],
+      gstThreshold: [discountedRoomTotal / numRooms / nights], // Pass discounted per room price
     });
 
     const gstRate = gstData?.gstPrice || 0;
-    const gstAmount = (roomBaseTotal * gstRate) / 100;
+    const gstAmount = (discountedRoomTotal * gstRate) / 100;
 
+    // Calculate food price
     const foodPrice = (foodDetails || []).reduce((sum, food) => {
       return sum + (food.price || 0) * (food.quantity || 1);
     }, 0);
 
-    // Final price includes discounted room total + GST + food
-    const finalPrice = Math.max(0, roomBaseTotal + gstAmount + foodPrice);
+    // Calculate final price
+    const finalPrice = discountedRoomTotal + gstAmount + foodPrice;
 
     const booking = new bookingModel({
       bookingId,
@@ -224,9 +82,9 @@ const createBooking = async (req, res) => {
       },
       createdBy: createdBy
         ? {
-            user: createdBy.user,
-            email: createdBy.email,
-          }
+          user: createdBy.user,
+          email: createdBy.email,
+        }
         : undefined,
       hotelDetails: {
         hotelCity,
@@ -242,12 +100,13 @@ const createBooking = async (req, res) => {
       gstAmount,
       foodPrice,
       baseRoomPrice: roomBaseTotal,
+      discountedRoomPrice: discountedRoomTotal, // Add this field for clarity
       checkInDate,
       checkOutDate,
       guests,
       price: finalPrice,
       couponCode,
-      discountPrice,
+      discountPrice: discountAmount,
       pm,
       isPartialBooking,
       partialAmount,
@@ -266,16 +125,17 @@ const createBooking = async (req, res) => {
       link: process.env.FRONTEND_URL,
     });
 
+    // Update room availability
     for (const bookedRoom of roomDetails) {
       const { roomId } = bookedRoom;
-
+    
       const hotel = await hotelModel.findOne({
         hotelId: hotelId,
         "rooms.roomId": roomId,
       });
-
+    
       const roomIndex = hotel?.rooms?.findIndex((r) => r.roomId === roomId);
-
+    
       if (
         hotel &&
         roomIndex !== -1 &&
