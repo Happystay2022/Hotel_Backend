@@ -24,6 +24,7 @@ const updateHistorySchema = new mongoose.Schema(
   { _id: false } // Avoid creating _id for each sub-document
 );
 
+
 // Main Complaint schema
 const complaintSchema = new mongoose.Schema(
   {
@@ -42,6 +43,30 @@ const complaintSchema = new mongoose.Schema(
       type: String,
       default: generateComplaintId,
     },
+    messages: [
+    {
+      sender: {
+        type: String,
+        required: true,
+      },
+      receiver: {
+        type: String,
+        required: true,
+      },
+      content: {
+        type: String,
+        required: true,
+      },
+      timestamp: {
+        type: Date,
+        default: Date.now,
+      },
+      seen: {
+        type: Boolean,
+        default: false,
+      },
+    },
+  ],
     regarding: {
       type: String,
       enum: ["Booking", "Hotel", "Website"],

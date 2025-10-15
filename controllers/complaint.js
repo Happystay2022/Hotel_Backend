@@ -1,7 +1,7 @@
 const Complaint = require('../models/complaint');
 
 const createComplaint = async (req, res) => {
-    const { userId, regarding, hotelName, hotelEmail, bookingId, status, issue, hotelId } = req.body;
+    const { userId, regarding, hotelName, hotelEmail, bookingId, status, issue, hotelId ,messages} = req.body;
     const images = req.files ? req.files.map((file) => file.location) : [];
     try {
         if (!userId || !regarding || !issue) {
@@ -24,6 +24,7 @@ const createComplaint = async (req, res) => {
             userId,
             hotelId,
             regarding,
+            messages,
             hotelEmail,
             hotelName,
             bookingId,
@@ -43,9 +44,9 @@ const createComplaint = async (req, res) => {
 
 //=============================================================================================
 //not===========
-const approveComplaint = async (req, res) => {
+const updateComplaint = async (req, res) => {
     const { id } = req.params;
-    const { status, feedBack, updatedBy } = req.body;
+    const { status, feedBack, updatedBy,messages } = req.body;
   
     try {
       if (!id) {
@@ -60,6 +61,7 @@ const approveComplaint = async (req, res) => {
       const newUpdate = {
         name: updatedBy.name,
         email: updatedBy.email,
+        messages,
         feedBack: feedBack || '', // Default to empty string if no feedback provided
         status,
         updatedAt: new Date(), // Track when the update happened
@@ -161,7 +163,7 @@ const filteredComplaints = async (req, res) => {
 //============================================================================
 module.exports = {
     createComplaint,
-    approveComplaint,
+    updateComplaint,
     getComplaintsByUserId,
     deleteComplaint,
     filteredComplaints,

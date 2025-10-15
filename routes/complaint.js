@@ -9,8 +9,8 @@ router.post(
   complaintController.createComplaint
 ); //on site
 router.patch(
-  "/approveComplaint-on-panel/by-id/:id",
-  complaintController.approveComplaint
+  "/updateComplaint-on-panel/by-id/:id",
+  complaintController.updateComplaint
 ); //on panel);
 router.get("/complaints/:userId", complaintController.getComplaintsByUserId); //on site
 router.delete(
