@@ -46,36 +46,43 @@ const createComplaint = async (req, res) => {
 //not===========
 const updateComplaint = async (req, res) => {
     const { id } = req.params;
-    const { status, feedBack, updatedBy,messages } = req.body;
-  
+    const { status, feedBack, updatedBy, messages } = req.body;
+
     try {
       if (!id) {
         return res.status(400).json({ success: false, message: 'Complaint ID is required' });
       }
-  
+
       if (!updatedBy?.name || !updatedBy?.email) {
         return res.status(400).json({ success: false, message: 'UpdatedBy must include name and email' });
       }
-  
+
       // Create new update object with timestamp
       const newUpdate = {
         name: updatedBy.name,
         email: updatedBy.email,
-        messages,
+        messages: messages || [], // Associate messages with this specific update
         feedBack: feedBack || '', // Default to empty string if no feedback provided
         status,
         updatedAt: new Date(), // Track when the update happened
       };
-  
+
+      // Prepare the update operation
+      const updateOperation = {
+        $set: { status }, // Update the top-level status
+        $push: { updatedBy: newUpdate }, // Append to update history
+      };
+
+      // If there are new messages, add them to the main messages array
+      if (messages && Array.isArray(messages) && messages.length > 0) {
+        updateOperation.$push.messages = { $each: messages };
+      }
+
       const updatedComplaint = await Complaint.findByIdAndUpdate(
         id,
-        {
-          $set: { status, feedBack },      // Update status and feedback
-          $push: { updatedBy: newUpdate }, // Append to update history
-        },
+        updateOperation,
         { new: true, runValidators: true }
       );
-  
       if (!updatedComplaint) {
         return res.status(404).json({ success: false, message: 'Complaint not found' });
       }
@@ -87,7 +94,7 @@ const updateComplaint = async (req, res) => {
       return res.status(500).json({ success: false, message: 'Server error' });
     }
   };
-  
+
 
 //=============================================================================================
 const getComplaintsByUserId = async (req, res) => {

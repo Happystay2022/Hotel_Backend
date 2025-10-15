@@ -9,7 +9,7 @@ router.post(
   complaintController.createComplaint
 ); //on site
 router.patch(
-  "/updateComplaint-on-panel/by-id/:id",
+  "/approveComplaint-on-panel/by-id/:id",
   complaintController.updateComplaint
 ); //on panel);
 router.get("/complaints/:userId", complaintController.getComplaintsByUserId); //on site

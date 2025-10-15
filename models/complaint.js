@@ -1,28 +1,10 @@
 const mongoose = require("mongoose");
 
 const generateComplaintId = () => {
-  const min = 10000000; // Minimum 8-digit number
-  const max = 99999999; // Maximum 8-digit number
-  return Math.floor(Math.random() * (max - min + 1)) + min;
+    const min = 10000000; // Minimum 8-digit number
+    const max = 99999999; // Maximum 8-digit number
+    return String(Math.floor(Math.random() * (max - min + 1)) + min);
 };
-
-// Sub-schema for update history
-const updateHistorySchema = new mongoose.Schema(
-  {
-    name: String,
-    email: String,
-    status: {
-      type: String,
-      enum: ["Pending", "Approved", "Rejected", "Resolved", "Working"],
-    },
-    feedBack: String,
-    updatedAt: {
-      type: Date,
-      default: Date.now,
-    },
-  },
-  { _id: false } // Avoid creating _id for each sub-document
-);
 
 const chatSchema = new mongoose.Schema({
   sender: {
@@ -42,19 +24,38 @@ const chatSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+// Sub-schema for update history
+const updateHistorySchema = new mongoose.Schema(
+    {
+        name: String,
+        email: String,
+        status: {
+            type: String,
+            enum: ['Pending', 'Approved', 'Rejected', 'Resolved', 'Working'],
+        },
+        feedBack: String,
+        messages: [chatSchema], // Associate messages with an update
+        updatedAt: {
+            type: Date,
+            default: Date.now,
+        },
+    },
+    { _id: false } // Avoid creating _id for each sub-document
+);
+
 // Main Complaint schema
 const complaintSchema = new mongoose.Schema(
   {
     userId: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'users',
       required: true,
     },
     hotelId: {
-      type: String,
-      required: true,
-    },
-    hotelEmail: {
-      type: String,
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'hotels',
+        required: true,
     },
     complaintId: {
       type: String,
@@ -66,8 +67,8 @@ const complaintSchema = new mongoose.Schema(
       enum: ["Booking", "Hotel", "Website"],
     },
     hotelName: String,
+    hotelEmail: String,
     bookingId: String,
-    feedBack: String, // Latest feedback (optional, for convenience)
     images: [String],
     status: {
       type: String,
