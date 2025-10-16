@@ -48,9 +48,8 @@ const carSchema = new Schema({
   },
   runningStatus: {
     type: String,
-    enum: ["On A Trip", "Available", "Trip Completed"],
+    enum: ["On A Trip", "Available", "Trip Completed","Unavailable"],
     default: "Available",
-    required: true,
   },
   seatConfig: [
     {
