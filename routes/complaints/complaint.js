@@ -30,7 +30,7 @@ router.get(
 
 
 // =========================================Chats================================
-router.post('/do-chat',doChat)
+router.post('/do/chat-support/:complaintId',doChat)
 
 
 module.exports=router

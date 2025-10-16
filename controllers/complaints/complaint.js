@@ -1,4 +1,5 @@
-const Complaint = require('../models/complaint');
+const Complaint = require('../../models/complaint');
+const chat = require('../../models/complaints/chat');
 
 const createComplaint = async (req, res) => {
     const { userId, regarding, hotelName, hotelEmail, bookingId, status, issue, hotelId ,messages} = req.body;
@@ -98,44 +99,101 @@ const updateComplaint = async (req, res) => {
 
 //=============================================================================================
 const getComplaintsByUserId = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const complaints = await Complaint.find({ userId });
-        return res.status(200).json(complaints);
-    } catch (error) {
-        return res.status(500).json({
-            message: 'Something went wrong',
-            error: error.message,
-        });
+  try {
+    const { userId } = req.params;
+
+    const complaints = await Complaint.find({
+      $expr: { $eq: [{ $toString: "$userId" }, userId] },
+    }).lean();
+
+    if (!complaints.length) {
+      return res.status(404).json({ message: "No complaints found for this user." });
     }
+
+    const complaintIds = complaints.map((c) => String(c.complaintId));
+    const chats = await chat.find({ complaintId: { $in: complaintIds } }).lean();
+
+    const complaintMap = {};
+    complaints.forEach((c) => {
+      complaintMap[c.complaintId] = { ...c, chats: [] };
+    });
+
+    chats.forEach((ch) => {
+      if (complaintMap[ch.complaintId]) {
+        complaintMap[ch.complaintId].chats.push(ch);
+      }
+    });
+
+    const combinedData = Object.values(complaintMap);
+    return res.status(200).json(combinedData);
+  } catch (error) {
+    console.error("Error fetching complaints by userId:", error);
+    return res.status(500).json({
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
 };
+
+
 
 //=======================delete a complaint=============================================
 const deleteComplaint = async (req, res) => {
-    try {
-        const { id } = req.params;
+  try {
+    const { id } = req.params;
 
-        // Check if the complaint exists
-        const deletedData = await Complaint.findByIdAndDelete(id);
-
-        if (!deletedData) {
-            return res.status(404).json({ message: 'Complaint not found' });
-        }
-
-        // Respond with the deleted complaint data
-        res.status(200).json({ message: 'Complaint deleted successfully', data: deletedData });
-    } catch (error) {
-        console.error('Error deleting complaint:', error);
-        res.status(500).json({ message: 'Internal server error' });
+    const complaint = await Complaint.findById(id);
+    if (!complaint) {
+      return res.status(404).json({ message: "Complaint not found" });
     }
+
+    const deletedChats = await chat.deleteMany({ complaintId: complaint.complaintId });
+    const deletedComplaint = await Complaint.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      message: "Complaint and related chats deleted successfully",
+      deletedComplaint,
+      deletedChatsCount: deletedChats.deletedCount,
+    });
+  } catch (error) {
+    console.error("Error deleting complaint:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
 };
 
 //=======================get all complaint=============================================
 
 const getComplaint = async (req, res) => {
-    const fetchAll = await Complaint.find();
-    return res.status(200).json(fetchAll);
+  try {
+    const fetchAll = await Complaint.find().lean();
+    if (!fetchAll.length) {
+      return res.status(404).json({ message: "No complaints found" });
+    }
+    const complaintIds = fetchAll.map((c) => c.complaintId);
+    const getChats = await chat.find({ complaintId: { $in: complaintIds } }).lean();
+    const complaintMap = {};
+    fetchAll.forEach((complaint) => {
+      complaintMap[complaint.complaintId] = { ...complaint, chats: [] };
+    });
+    getChats.forEach((chatDoc) => {
+      if (complaintMap[chatDoc.complaintId]) {
+        complaintMap[chatDoc.complaintId].chats.push(chatDoc);
+      }
+    });
+    const combinedData = Object.values(complaintMap);
+    return res.status(200).json(combinedData);
+  } catch (error) {
+    console.error("Error combining complaints and chats:", error);
+    return res.status(500).json({
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
 };
+
 //================================filter complaints ============================================
 const filteredComplaints = async (req, res) => {
     try {
