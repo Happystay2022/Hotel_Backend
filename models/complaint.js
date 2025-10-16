@@ -1,74 +1,54 @@
 const mongoose = require("mongoose");
 
 const generateComplaintId = () => {
-    const min = 10000000; // Minimum 8-digit number
-    const max = 99999999; // Maximum 8-digit number
-    return String(Math.floor(Math.random() * (max - min + 1)) + min);
+  const min = 10000000; // Minimum 8-digit number
+  const max = 99999999; // Maximum 8-digit number
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 };
-
-const chatSchema = new mongoose.Schema({
-  sender: {
-    type: String,
-    required: true,
-  },
-  receiver: {
-    type: String,
-    required: true,
-  },
-  content: {
-    type: String,
-    required: true,
-  },
-  timestamp: {
-    type: Date,
-    default: Date.now,
-  },
-});
 
 // Sub-schema for update history
 const updateHistorySchema = new mongoose.Schema(
-    {
-        name: String,
-        email: String,
-        status: {
-            type: String,
-            enum: ['Pending', 'Approved', 'Rejected', 'Resolved', 'Working'],
-        },
-        feedBack: String,
-        messages: [chatSchema], // Associate messages with an update
-        updatedAt: {
-            type: Date,
-            default: Date.now,
-        },
+  {
+    name: String,
+    email: String,
+    status: {
+      type: String,
+      enum: ["Pending", "Approved", "Rejected", "Resolved", "Working"],
     },
-    { _id: false } // Avoid creating _id for each sub-document
+    feedBack: String,
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false } // Avoid creating _id for each sub-document
 );
 
 // Main Complaint schema
 const complaintSchema = new mongoose.Schema(
   {
     userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'users',
+      type: String,
       required: true,
     },
     hotelId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'hotels',
-        required: true,
+      type: String,
+      required: true,
+    },
+    hotelEmail: {
+      type: String,
     },
     complaintId: {
       type: String,
       default: generateComplaintId,
     },
-    messages: [chatSchema],
     regarding: {
       type: String,
       enum: ["Booking", "Hotel", "Website"],
     },
     hotelName: String,
-    hotelEmail: String,
     bookingId: String,
+    feedBack: String, // Latest feedback (optional, for convenience)
     images: [String],
     status: {
       type: String,

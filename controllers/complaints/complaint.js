@@ -2,7 +2,7 @@ const Complaint = require('../../models/complaint');
 const chat = require('../../models/complaints/chat');
 
 const createComplaint = async (req, res) => {
-    const { userId, regarding, hotelName, hotelEmail, bookingId, status, issue, hotelId ,messages} = req.body;
+    const { userId, regarding, hotelName, hotelEmail, bookingId, status, issue, hotelId } = req.body;
     const images = req.files ? req.files.map((file) => file.location) : [];
     try {
         if (!userId || !regarding || !issue) {
@@ -25,7 +25,6 @@ const createComplaint = async (req, res) => {
             userId,
             hotelId,
             regarding,
-            messages,
             hotelEmail,
             hotelName,
             bookingId,
