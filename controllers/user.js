@@ -1,21 +1,22 @@
 const booking = require("../models/booking/booking");
 const userModel = require("../models/user");
 const UserCoupon = require("../models/coupons/userCoupon");
-const jwt = require("jsonwebtoken"); // Import the JWT library
-require("dotenv").config(); // Load environment variables
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
 const otpAuth = require("../authentication/otpLogin");
-//====================================================================================
+
 const createSignup = async function (req, res) {
   try {
     const { email, mobile } = req.body;
+
     if (email) {
-      const existingCoupon = await UserCoupon.find({ assignedTo: email });
+      const existingCoupon = await UserCoupon.find({
+        assignedTo: { $regex: `^${email}$`, $options: "i" },
+      });
 
       if (existingCoupon.length === 0) {
         const currentDate = new Date();
-        const validity = new Date(
-          currentDate.setDate(currentDate.getDate() + 7)
-        ); // 7-day validity
+        const validity = new Date(currentDate.setDate(currentDate.getDate() + 7));
 
         await UserCoupon.create({
           couponName: "Welcome50",
@@ -26,19 +27,20 @@ const createSignup = async function (req, res) {
         });
       }
     }
+
     if (email) {
-      const findWithEmail = await userModel.findOne({ email: email });
+      const findWithEmail = await userModel.findOne({
+        email: { $regex: `^${email}$`, $options: "i" },
+      });
       if (findWithEmail) {
         return res.status(400).json({ message: "Email is already in use" });
       }
     }
 
     if (mobile) {
-      const findWithMobile = await userModel.findOne({ mobile: mobile });
+      const findWithMobile = await userModel.findOne({ mobile });
       if (findWithMobile) {
-        return res
-          .status(400)
-          .json({ message: "Mobile number is already in use" });
+        return res.status(400).json({ message: "Mobile number is already in use" });
       }
     }
 
@@ -65,19 +67,18 @@ const createSignup = async function (req, res) {
   }
 };
 
-//=====================================Google Sign in=================================
-
 const GoogleSignIn = async function (req, res) {
   try {
     const { email, uid, userName, images } = req.body;
+
     if (email) {
-      const existingCoupon = await UserCoupon.find({ assignedTo: email });
+      const existingCoupon = await UserCoupon.find({
+        assignedTo: { $regex: `^${email}$`, $options: "i" },
+      });
 
       if (existingCoupon.length === 0) {
         const currentDate = new Date();
-        const validity = new Date(
-          currentDate.setDate(currentDate.getDate() + 7)
-        ); // 7-day validity
+        const validity = new Date(currentDate.setDate(currentDate.getDate() + 7));
 
         await UserCoupon.create({
           couponName: "Welcome50",
@@ -88,11 +89,12 @@ const GoogleSignIn = async function (req, res) {
         });
       }
     }
-    // Check if the user already exists based on email or UID
-    const existingUser = await userModel.findOne({ $or: [{ email }, { uid }] });
+
+    const existingUser = await userModel.findOne({
+      $or: [{ email: { $regex: `^${email}$`, $options: "i" } }, { uid }],
+    });
 
     if (existingUser) {
-      // If user already exists, generate a JWT token
       const token = jwt.sign(
         { id: existingUser.userId },
         process.env.JWT_SECRET,
@@ -108,7 +110,6 @@ const GoogleSignIn = async function (req, res) {
       });
     }
 
-    // If user doesn't exist, create a new user
     const user = await userModel.create({ email, uid, userName, images });
 
     const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, {
@@ -122,70 +123,93 @@ const GoogleSignIn = async function (req, res) {
       rsToken: token,
     });
   } catch (error) {
-    // Handle any errors that might occur during the process
     console.error(error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
-//============================================== Mobile OTP Login==============================
+
 const loginWithOtp = async (req, res) => {
-  const { phoneNumber } = req.body;
-  const modifiedNumber = phoneNumber.replace(/\D/g, '').slice(-10);
-  const user = await userModel.findOne({ mobile: { $regex: `${modifiedNumber}$` } });
-  if (!user) {
-    return res.status(404).json({ success: false, message: 'Please register Your self' });
-  }
-  const result = await otpAuth.sendOtp(phoneNumber);
-  res.json(result);
-};
-const verifyOTP = async (req, res) => {
-  const { phoneNumber, code } = req.body;
-  const result = await otpAuth.verifyOtp(phoneNumber, code);
-  if (!result.success) {
-    return res.status(400).json({ success: false, message: 'OTP verification failed' });
-  }
-  const modifiedNumber = phoneNumber.replace(/\D/g, '').slice(-10);
-  const user = await userModel.findOne({ mobile: { $regex: `${modifiedNumber}$` } });
-  if (!user) {
-    return res.status(404).json({ success: false, message: 'User not found' });
-  }
-  const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, {
-    expiresIn: '24h',
-  });
-  res.status(200).json({
-    result,
-    userId: user.userId,
-    mobile: user.mobile,
-    email: user.email,
-    rsToken: token,
-  });
-};
-
-//==============================================SIGN IN==============================
-
-const signIn = async function (req, res) {
-  const { email, password } = req.body;
-
   try {
-    // Find user by email
-    const user = await userModel.findOne({ email });
+    const { phoneNumber } = req.body;
+    const modifiedNumber = phoneNumber.replace(/\D/g, "").slice(-10);
 
-    // If user does not exist
+    const user = await userModel.findOne({
+      mobile: { $regex: `${modifiedNumber}$` },
+    });
+
     if (!user) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Please register yourself" });
     }
 
-    // Check if the provided password matches the stored password
-    if (user.password !== password) {
-      return res.status(401).json({ message: "Invalid email or password" });
+    const result = await otpAuth.sendOtp(phoneNumber);
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+const verifyOTP = async (req, res) => {
+  try {
+    const { phoneNumber, code } = req.body;
+    const result = await otpAuth.verifyOtp(phoneNumber, code);
+
+    if (!result.success) {
+      return res
+        .status(400)
+        .json({ success: false, message: "OTP verification failed" });
     }
 
-    // Generate JWT token
+    const modifiedNumber = phoneNumber.replace(/\D/g, "").slice(-10);
+    const user = await userModel.findOne({
+      mobile: { $regex: `${modifiedNumber}$` },
+    });
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
     const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, {
       expiresIn: "24h",
     });
 
-    // Return success response with token
+    res.status(200).json({
+      result,
+      userId: user.userId,
+      mobile: user.mobile,
+      email: user.email,
+      rsToken: token,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+const signIn = async function (req, res) {
+  try {
+    const { email, password } = req.body;
+
+    const user = await userModel.findOne({
+      email: { $regex: `^${email}$`, $options: "i" },
+    });
+
+    if (!user) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    if (user.password !== password) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, {
+      expiresIn: "24h",
+    });
+
     res.status(200).json({
       message: "Sign-in successful",
       userId: user.userId,
@@ -200,47 +224,46 @@ const signIn = async function (req, res) {
   }
 };
 
-//======================================================
 const getUserById = async function (req, res) {
   try {
-    let userId = req.params.userId;
+    const { userId } = req.params;
 
-    let checkData = await userModel.findOne({ userId: userId });
+    const checkData = await userModel.findOne({ userId });
+
     if (!checkData) {
-      return res
-        .status(404)
-        .send({ status: false, message: "userId not exist" });
+      return res.status(404).json({
+        status: false,
+        message: "userId does not exist",
+      });
     }
 
-    return res.status(200).send({
+    return res.status(200).json({
       status: true,
       message: "Users Profile Details",
       data: checkData,
     });
   } catch (err) {
-    return res.status(500).send({ status: false, msg: err.message });
+    return res.status(500).json({ status: false, message: err.message });
   }
 };
 
-//==========================get count of users===========================//
 const totalUser = async function (req, res) {
   try {
-    const getall = await userModel.countDocuments({});
-    res.status(200).json(getall);
+    const count = await userModel.countDocuments({});
+    res.status(200).json(count);
   } catch (error) {
     console.error("Error fetching total users:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
 
-//=====================================================================
 const update = async (req, res) => {
   try {
     const { userId, userName, address, email, mobile, password } = req.body;
 
     if (email) {
       const findWithEmail = await userModel.findOne({
-        email: email,
+        email: { $regex: `^${email}$`, $options: "i" },
         userId: { $ne: userId },
       });
       if (findWithEmail) {
@@ -252,7 +275,7 @@ const update = async (req, res) => {
 
     if (mobile) {
       const findWithMobile = await userModel.findOne({
-        mobile: mobile,
+        mobile,
         userId: { $ne: userId },
       });
       if (findWithMobile) {
@@ -296,7 +319,6 @@ const update = async (req, res) => {
   }
 };
 
-//===============================================================================
 const getAllUsers = async (req, res) => {
   try {
     const userData = await userModel.find();
@@ -305,37 +327,35 @@ const getAllUsers = async (req, res) => {
       data: userData,
     });
   } catch (error) {
-    console.error("Error fetching user data:", error); // Log error for debugging
+    console.error("Error fetching user data:", error);
     return res.status(500).json({
       message: "Something went wrong",
-      error: error.message, // Optionally include the error message
+      error: error.message,
     });
   }
 };
 
 const findUser = async (req, res) => {
   try {
-    let { mobile, email } = req.query;
+    const { mobile, email } = req.query;
 
-    // Build the query object
     let query = {};
     if (mobile) {
       query.mobile = mobile;
     }
     if (email) {
-      query.email = email;
+      query.email = { $regex: `^${email}$`, $options: "i" };
     }
 
-    // Find user(s) based on the query
-    const findUserData = await userModel.find(query); // Correct the method call
+    const findUserData = await userModel.find(query);
 
-    // Check if any user data was found
     if (findUserData.length > 0) {
       return res.status(200).json({ success: true, data: findUserData });
     } else {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
     }
   } catch (error) {
     console.error(error);
@@ -393,7 +413,7 @@ const getAllUserDetails = async (req, res) => {
           mobile: user.mobile,
           profile: user?.images,
           address: user?.address,
-          bookings: bookings,
+          bookings,
         };
       })
     );
