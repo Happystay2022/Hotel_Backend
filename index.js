@@ -1,93 +1,88 @@
 const cluster = require('cluster');
 const os = require('os');
-const numCPUs = os.cpus().length;
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
 
-// Change to false to run without cluster for testing
+const webSocketHandler = require('./controllers/chatApp/webSocket');
+const routes = require('./routes/index');
+const connectDB = require('./config/db');
+const mailerRoutes = require('./nodemailer/routes');
+const setupChatRoutes = require('./routes/chatApp/chatAppRoutes');
+
+const numCPUs = os.cpus().length;
 const USE_CLUSTER = false;
 
+const CORS_ORIGINS = [
+  'http://localhost:3030',
+  'http://localhost:5173',
+  'https://hotelroomsstay.com',
+  'https://roomsstay.vercel.app',
+];
+
+const PORT = process.env.PORT || 5000;
+
+const startServer = () => {
+  const app = express();
+  const server = http.createServer(app);
+  const io = socketIo(server, {
+    cors: {
+      origin: CORS_ORIGINS,
+      methods: ['GET', 'POST'],
+      credentials: true,
+    },
+  });
+
+  app.use(cors());
+  app.use(express.json());
+
+  app.use('/mail', mailerRoutes);
+
+  connectDB()
+    .then(() => console.log(`Database connected - PID ${process.pid}`))
+    .catch((err) => console.error('Database connection error:', err));
+
+  webSocketHandler(io);
+
+  app.use('/', routes);
+  app.use('/chatApp', setupChatRoutes(io));
+
+  app.get('/health', (req, res) => {
+    res.status(200).json({
+      status: 'ok',
+      message: 'Server is running',
+      pid: process.pid,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT} - PID ${process.pid}`);
+  });
+
+  const gracefulShutdown = () => {
+    server.close(() => {
+      console.log(`Worker ${process.pid} closed`);
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGINT', gracefulShutdown);
+  process.on('SIGTERM', gracefulShutdown);
+};
+
 if (USE_CLUSTER && cluster.isMaster) {
-    // Fork workers
-    for (let i = 0; i < numCPUs; i++) {
-        cluster.fork();
-    }
+  console.log(`Master PID ${process.pid} starting ${numCPUs} workers`);
 
-    // Restart any worker that dies
-    cluster.on('exit', (worker) => {
-        cluster.fork();
-    });
+  for (let i = 0; i < numCPUs; i++) {
+    cluster.fork();
+  }
 
+  cluster.on('exit', (worker) => {
+    console.log(`Worker ${worker.process.pid} died. Restarting...`);
+    cluster.fork();
+  });
 } else {
-    // ===== Your Original Server Code =====
-    const express = require('express');
-    const http = require('http');
-    const socketIo = require('socket.io');
-    const cors = require('cors');
-    const webSocketHandler = require('./controllers/chatApp/webSocket');
-    const routes = require('./routes/index');
-    const connectDB = require('./config/db');
-    const mailerRoutes = require('./nodemailer/routes');
-    const setupChatRoutes = require('./routes/chatApp/chatAppRoutes');
-
-    // Create an Express application
-    const app = express();
-    const server = http.createServer(app);
-    const io = socketIo(server, {
-        cors: {
-            origin: [
-                'http://localhost:3030',
-                'http://localhost:5173',
-                'https://hotelroomsstay.com',
-                'https://roomsstay.vercel.app'
-            ],
-            methods: ['GET', 'POST'],
-            credentials: true,
-        },
-    });
-
-    // Middleware to log response time
-    app.use((req, res, next) => {
-        const start = Date.now();
-        res.on('finish', () => {
-            const duration = Date.now() - start;
-        });
-        next();
-    });
-
-    // Middleware
-    app.use(cors());
-    app.use(express.json());
-    app.use('/mail', mailerRoutes);
-
-    // Connect to the database
-    connectDB()
-        .then(() => console.log(`Database connected successfully - PID ${process.pid}`))
-        .catch((err) => console.error('Database connection error:', err));
-
-    // Set up WebSocket
-    webSocketHandler(io);
-
-    // Set up routes
-    app.use('/', routes);
-    app.use('/chatApp', setupChatRoutes(io));
-
-    // Start the server
-    const PORT = process.env.PORT || 5000;
-    server.listen(PORT, '0.0.0.0', () => {
-        console.log(`Server running on port ${PORT} - PID ${process.pid}`);
-    });
-
-    // Graceful shutdown
-    process.on('SIGINT', () => {
-        server.close(() => {
-            console.log(`Worker ${process.pid} closed`);
-            process.exit(0);
-        });
-    });
-
-    process.on('SIGTERM', () => {
-        server.close(() => {
-            console.log(`Worker ${process.pid} closed`);
-            process.exit(0);
-        });
-    });
+  startServer();
 }
