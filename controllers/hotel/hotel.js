@@ -498,6 +498,31 @@ const getHotelsByFilters = async (req, res) => {
 
     let filters = {};
 
+    // If no query filters are provided at all, return an empty array instead of fetching all hotels
+    const hasAnyFilter = [
+      search,
+      starRating,
+      propertyType,
+      localId,
+      latitude,
+      longitude,
+      countRooms,
+      hotelCategory,
+      type,
+      bedTypes,
+      amenities,
+      unmarriedCouplesAllowed,
+      minPrice,
+      maxPrice,
+      checkInDate,
+      checkOutDate,
+    ].some((v) => v !== undefined && v !== null && String(v).trim() !== "");
+
+    if (!hasAnyFilter) {
+      // No filters supplied — return empty result set
+      return res.status(200).json({ success: true, data: [] });
+    }
+
     // Combined search input
     if (search) {
       const searchPattern = new RegExp(search, "i");
@@ -536,6 +561,7 @@ const getHotelsByFilters = async (req, res) => {
     }
 
     // Fetch hotels that match all filters
+   
     const hotels = await hotelModel.find(filters);
     const acceptedHotels = hotels.filter((hotel) => hotel.isAccepted);
 

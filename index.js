@@ -1,24 +1,24 @@
-const cluster = require('cluster');
-const os = require('os');
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const cors = require('cors');
+const cluster = require("cluster");
+const os = require("os");
+const express = require("express");
+const http = require("http");
+const socketIo = require("socket.io");
+const cors = require("cors");
 
-const webSocketHandler = require('./controllers/chatApp/webSocket');
-const routes = require('./routes/index');
-const connectDB = require('./config/db');
-const mailerRoutes = require('./nodemailer/routes');
-const setupChatRoutes = require('./routes/chatApp/chatAppRoutes');
+const webSocketHandler = require("./controllers/chatApp/webSocket");
+const routes = require("./routes/index");
+const connectDB = require("./config/db");
+const mailerRoutes = require("./nodemailer/routes");
+const setupChatRoutes = require("./routes/chatApp/chatAppRoutes");
 
 const numCPUs = os.cpus().length;
 const USE_CLUSTER = false;
 
 const CORS_ORIGINS = [
-  'http://localhost:3030',
-  'http://localhost:5173',
-  'https://hotelroomsstay.com',
-  'https://roomsstay.vercel.app',
+  "http://localhost:3030",
+  "http://localhost:5173",
+  "https://hotelroomsstay.com",
+  "https://roomsstay.vercel.app",
 ];
 
 const PORT = process.env.PORT || 5000;
@@ -29,7 +29,7 @@ const startServer = () => {
   const io = socketIo(server, {
     cors: {
       origin: CORS_ORIGINS,
-      methods: ['GET', 'POST'],
+      methods: ["GET", "POST"],
       credentials: true,
     },
   });
@@ -37,27 +37,33 @@ const startServer = () => {
   app.use(cors());
   app.use(express.json());
 
-  app.use('/mail', mailerRoutes);
+  app.use("/mail", mailerRoutes);
 
   connectDB()
     .then(() => console.log(`Database connected - PID ${process.pid}`))
-    .catch((err) => console.error('Database connection error:', err));
+    .catch((err) => console.error("Database connection error:", err));
 
   webSocketHandler(io);
 
-  app.use('/', routes);
-  app.use('/chatApp', setupChatRoutes(io));
+  app.use("/", routes);
+  app.use("/chatApp", setupChatRoutes(io));
 
-  app.get('/health', (req, res) => {
+  app.get("/health", (req, res) => {
     res.status(200).json({
-      status: 'ok',
-      message: 'Server is running',
+      status: "ok",
+      message: "Server is running",
       pid: process.pid,
       timestamp: new Date().toISOString(),
     });
   });
+  app.get("/auth/me", (req, res) => {
+    res.status(200).json({
+      status: "ok",
+      message: "Auth service is running",
+    });
+  });
 
-  server.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT} - PID ${process.pid}`);
   });
 
@@ -68,8 +74,8 @@ const startServer = () => {
     });
   };
 
-  process.on('SIGINT', gracefulShutdown);
-  process.on('SIGTERM', gracefulShutdown);
+  process.on("SIGINT", gracefulShutdown);
+  process.on("SIGTERM", gracefulShutdown);
 };
 
 if (USE_CLUSTER && cluster.isMaster) {
@@ -79,7 +85,7 @@ if (USE_CLUSTER && cluster.isMaster) {
     cluster.fork();
   }
 
-  cluster.on('exit', (worker) => {
+  cluster.on("exit", (worker) => {
     console.log(`Worker ${worker.process.pid} died. Restarting...`);
     cluster.fork();
   });
