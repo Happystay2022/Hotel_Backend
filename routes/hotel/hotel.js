@@ -2,9 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { upload } = require('../../aws/upload');
 const hotelController = require('../../controllers/hotel/hotel');
-
+const { createHotelBulk } = require('../../controllers/hotel/bulkhotel');
+const multer = require('multer');
+const uploadNone = multer().none();
 // Routes with authentication
 router.post('/data/hotels-new/post/upload/data', upload, hotelController.createHotel);
+router.post('/hotels/bulk', uploadNone, createHotelBulk);
+
 router.patch('/hotels/update/:hotelId', hotelController.UpdateHotelStatus); // isAccepted, onFront admin panel
 router.patch('/hotels/update/info/:hotelId', hotelController.UpdateHotelInfo); // basic details
 router.get('/get/all/hotels', hotelController.getAllHotels); // on panel

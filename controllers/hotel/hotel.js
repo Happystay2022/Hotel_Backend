@@ -561,7 +561,6 @@ const getHotelsByFilters = async (req, res) => {
     }
 
     // Fetch hotels that match all filters
-   
     const hotels = await hotelModel.find(filters);
     const acceptedHotels = hotels.filter((hotel) => hotel.isAccepted);
 
