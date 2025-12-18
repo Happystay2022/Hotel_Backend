@@ -1,18 +1,88 @@
 const TourBooking = require("../../models/tour/booking");
+const TourModel = require("../../models/tour/tour");
 
 exports.createBooking = async (req, res) => {
   try {
     const data = req.body;
+
+    const seats = Array.isArray(data.seats) ? data.seats : [];
+    if (!data.tourId || !data.vehicleId) {
+      return res.status(400).json({ message: "tourId and vehicleId required" });
+    }
+
+    if (seats.length > 0) {
+      const conflict = await TourBooking.findOne({
+        tourId: data.tourId,
+        vehicleId: data.vehicleId,
+        status: { $ne: "cancelled" },
+        seats: { $in: seats }
+      }).select("_id bookingCode seats");
+
+      if (conflict) {
+        return res.status(409).json({
+          message: "Some seats already booked",
+          conflict
+        });
+      }
+    }
 
     const newBooking = await TourBooking.create(data);
     return res.status(201).json(newBooking);
   } catch (error) {
     return res.status(500).json({
       message: "Something went wrong while creating the booking",
-      error: error.message,
+      error: error.message
     });
   }
 };
+
+exports.getVehicleSeats = async (req, res) => {
+  const { tourId, vehicleId } = req.params;
+
+  try {
+    const tour = await TourModel.findById(tourId).select("vehicles");
+    if (!tour) return res.status(404).json({ message: "Tour not found" });
+
+    const vehicle = (tour.vehicles || []).find((v) => String(v._id) === String(vehicleId));
+    if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+
+    const seatLayout = Array.isArray(vehicle.seatLayout) && vehicle.seatLayout.length > 0
+      ? vehicle.seatLayout
+      : Array.from({ length: Number(vehicle.totalSeats || 0) }, (_, i) => String(i + 1));
+
+    const bookedAgg = await TourBooking.aggregate([
+      {
+        $match: {
+          tourId: tour._id,
+          vehicleId: vehicle._id,
+          status: { $ne: "cancelled" }
+        }
+      },
+      { $unwind: "$seats" },
+      { $group: { _id: null, booked: { $addToSet: "$seats" } } }
+    ]);
+
+    const bookedSeats = bookedAgg?.[0]?.booked || [];
+    const bookedSet = new Set(bookedSeats);
+
+    const seats = seatLayout.map((code) => ({
+      code,
+      status: bookedSet.has(code) ? "booked" : "available"
+    }));
+
+    return res.status(200).json({
+      tourId: String(tour._id),
+      vehicleId: String(vehicle._id),
+      seats
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to fetch seats",
+      error: error.message
+    });
+  }
+};
+
 
 exports.getBookings = async (req, res) => {
   try {

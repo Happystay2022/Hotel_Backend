@@ -314,10 +314,18 @@ const getByQuery = async (req, res) => {
     !hotelEmail &&
     !roomTypes
   ) {
-    // Fetch all data where isAccepted is true
-    const allData = await hotelModel.find({ isAccepted: true });
-    res.json(allData);
-    return;
+    // Fetch all data where isAccepted is true using cursor stream
+    res.setHeader('Content-Type', 'application/json');
+    res.write('[');
+    let first = true;
+    const cursor = hotelModel.find({ isAccepted: true }).cursor();
+    for await (const hotel of cursor) {
+      if (!first) res.write(',');
+      res.write(JSON.stringify(hotel));
+      first = false;
+    }
+    res.write(']');
+    return res.end();
   }
 
   const queryParameters = [
@@ -357,11 +365,19 @@ const getByQuery = async (req, res) => {
       // Add check for isAccepted
       query["isAccepted"] = true;
 
-      fetchedData = await hotelModel.find(query);
-
-      if (fetchedData.length > 0) {
-        break; // Exit the loop if data is found
+      // Use cursor for streaming
+      res.setHeader('Content-Type', 'application/json');
+      res.write('[');
+      let first = true;
+      const cursor = hotelModel.find(query).cursor();
+      for await (const hotel of cursor) {
+        if (!first) res.write(',');
+        res.write(JSON.stringify(hotel));
+        first = false;
+        fetchedData.push(hotel);
       }
+      res.write(']');
+      return res.end();
     }
   }
 
@@ -372,9 +388,17 @@ const getByQuery = async (req, res) => {
 
 const getAllHotels = async (req, res) => {
   try {
-    const getData = await hotelModel.find().sort({ isAccepted: 1 });
-
-    res.json({ success: true, data: getData });
+    res.setHeader('Content-Type', 'application/json');
+    res.write('{"success":true,"data":[');
+    let first = true;
+    const cursor = hotelModel.find().sort({ isAccepted: 1 }).cursor();
+    for await (const hotel of cursor) {
+      if (!first) res.write(',');
+      res.write(JSON.stringify(hotel));
+      first = false;
+    }
+    res.write(']}');
+    res.end();
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: "Internal Server Error" });
@@ -383,16 +407,27 @@ const getAllHotels = async (req, res) => {
 
 //===========================get hotels====================================================//
 const getHotels = async (req, res) => {
-  const hotels = await hotelModel.find().sort({ createdAt: -1 });
-  const filterData = hotels.filter((hotel) => hotel.onFront === false);
-  res.json(filterData);
+  try {
+    res.setHeader('Content-Type', 'application/json');
+    res.write('[');
+    let first = true;
+    const cursor = hotelModel.find({ onFront: false }).sort({ createdAt: -1 }).cursor();
+    for await (const hotel of cursor) {
+      if (!first) res.write(',');
+      res.write(JSON.stringify(hotel));
+      first = false;
+    }
+    res.write(']');
+    res.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 };
 //======================================get offers==========================================//
 const setOnFront = async (req, res) => {
   try {
-    const hotels = await hotelModel.find().sort({ createdAt: -1 });
-    const filterData = hotels.filter((hotel) => hotel.onFront === true);
-    const monthlyData = await monthly.find();
+    const monthlyData = await monthly.find().lean();
 
     // Get the current date in YYYY-MM-DD format (IST)
     const currentDate = new Date();
@@ -400,29 +435,39 @@ const setOnFront = async (req, res) => {
     const currentDateIST = new Date(currentDate.getTime() + IST_OFFSET);
     const formattedCurrentDate = currentDateIST.toISOString().split("T")[0];
 
-    // Update room prices based on monthly data
-    filterData.forEach((hotel) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.write('[');
+    let first = true;
+    
+    const cursor = hotelModel.find({ onFront: true }).sort({ createdAt: -1 }).cursor();
+    
+    for await (const hotel of cursor) {
+      // Update room prices based on monthly data
       hotel.rooms.forEach((room) => {
         const matchingMonthlyEntry = monthlyData.find((data) => {
           const startDate = new Date(data.startDate);
           const endDate = new Date(data.endDate);
 
           return (
-            data.hotelId === hotel.hotelId.toString() && // Ensure matching hotel ID
-            data.roomId === room.roomId && // Ensure matching room ID
-            formattedCurrentDate >= startDate.toISOString().split("T")[0] && // Current date is after or equal to startDate
-            formattedCurrentDate <= endDate.toISOString().split("T")[0] // Current date is before or equal to endDate
+            data.hotelId === hotel.hotelId.toString() &&
+            data.roomId === room.roomId &&
+            formattedCurrentDate >= startDate.toISOString().split("T")[0] &&
+            formattedCurrentDate <= endDate.toISOString().split("T")[0]
           );
         });
 
-        // If there's a matching monthly entry, update the room price
         if (matchingMonthlyEntry) {
           room.price = matchingMonthlyEntry.monthPrice;
         }
       });
-    });
 
-    res.json(filterData);
+      if (!first) res.write(',');
+      res.write(JSON.stringify(hotel));
+      first = false;
+    }
+    
+    res.write(']');
+    res.end();
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: "Internal Server Error" });
@@ -438,9 +483,22 @@ const getCity = async function (req, res) {
     searchQuery.city = { $regex: new RegExp(city, "i") };
   }
 
-  const hotels = await hotelModel.find(searchQuery).sort({ createdAt: -1 });
-
-  res.json(hotels);
+  try {
+    res.setHeader('Content-Type', 'application/json');
+    res.write('[');
+    let first = true;
+    const cursor = hotelModel.find(searchQuery).sort({ createdAt: -1 }).cursor();
+    for await (const hotel of cursor) {
+      if (!first) res.write(',');
+      res.write(JSON.stringify(hotel));
+      first = false;
+    }
+    res.write(']');
+    res.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 };
 
 //=================================================================================
@@ -468,11 +526,19 @@ const getHotelsByLocalID = async (req, res) => {
   const { localId } = req.params;
 
   try {
-    const hotels = await hotelModel
-      .find({ "location.localId": localId })
-      .sort({ createdAt: -1 });
-    res.json(hotels);
+    res.setHeader('Content-Type', 'application/json');
+    res.write('[');
+    let first = true;
+    const cursor = hotelModel.find({ "location.localId": localId }).sort({ createdAt: -1 }).cursor();
+    for await (const hotel of cursor) {
+      if (!first) res.write(',');
+      res.write(JSON.stringify(hotel));
+      first = false;
+    }
+    res.write(']');
+    res.end();
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Failed to fetch hotels" });
   }
 };
@@ -497,7 +563,11 @@ const getHotelsByFilters = async (req, res) => {
       maxPrice,
       checkInDate,
       checkOutDate,
+      page = 1,
+      limit = 10,
     } = req.query;
+    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
     let filters = {};
 
@@ -563,33 +633,80 @@ const getHotelsByFilters = async (req, res) => {
       filters["rooms.price"] = priceFilter;
     }
 
-    // Fetch hotels that match all filters
-    const hotels = await hotelModel.find(filters);
-    const acceptedHotels = hotels.filter((hotel) => hotel.isAccepted);
+    // Add isAccepted filter directly in query
+    filters.isAccepted = true;
+
+    // Get monthly data
+    const monthlyData = await monthly.find().lean();
 
     // If checkInDate and checkOutDate are provided, check availability
     if (checkInDate && checkOutDate) {
+      // Fetch all bookings for the date range in ONE query
+      const allBookings = await bookingsModel.find({
+        $or: [
+          {
+            checkInDate: { $lte: new Date(checkOutDate) },
+            checkOutDate: { $gte: new Date(checkInDate) }
+          }
+        ]
+      }).select('hotelId numRooms').lean();
+
+      // Create a map of hotelId -> total booked rooms
+      const bookedRoomsMap = {};
+      allBookings.forEach(booking => {
+        if (!bookedRoomsMap[booking.hotelId]) {
+          bookedRoomsMap[booking.hotelId] = 0;
+        }
+        bookedRoomsMap[booking.hotelId] += booking.numRooms;
+      });
+
       const availableHotels = [];
+      let count = 0;
+      const cursor = hotelModel.find(filters).cursor();
+      
+      for await (const hotel of cursor) {
+        const totalRooms = hotel.rooms.reduce((total, room) => total + (room.countRooms || 0), 0);
+        const bookedRooms = bookedRoomsMap[hotel.hotelId] || 0;
+        const availableRooms = totalRooms - bookedRooms;
 
-      for (const hotel of acceptedHotels) {
-        // Check availability for this hotel
-        const { availableRooms } = await checkAvailability({
-          hotelId: hotel.hotelId,
-          checkInDate,
-          checkOutDate,
-        });
-
-        // If available rooms are present, add to the list
         if (availableRooms > 0) {
-          availableHotels.push(hotel);
+          // Update room prices based on monthly data
+          hotel.rooms.forEach((room) => {
+            const matchingMonthlyEntry = monthlyData.find((data) => {
+              return (
+                data.hotelId === hotel.hotelId.toString() &&
+                data.roomId === room.roomId &&
+                data.startDate <= new Date() &&
+                data.endDate >= new Date()
+              );
+            });
+
+            if (matchingMonthlyEntry) {
+              room.price = matchingMonthlyEntry.monthPrice;
+            }
+          });
+
+          // Apply pagination
+          if (count >= skip && availableHotels.length < parseInt(limit)) {
+            availableHotels.push(hotel);
+          }
+          count++;
+          
+          // Stop if we've collected enough results
+          if (availableHotels.length >= parseInt(limit)) {
+            break;
+          }
         }
       }
 
-      return res.status(200).json({ success: true, data: availableHotels });
+      return res.status(200).json({ 
+        success: true, 
+        data: availableHotels,
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit)
+      });
     }
-
-    // Get monthly data
-    const monthlyData = await monthly.find();
 
     // Get current date in YYYY-MM-DD format (IST)
     const currentDate = new Date();
@@ -597,13 +714,19 @@ const getHotelsByFilters = async (req, res) => {
     const currentDateIST = new Date(currentDate.getTime() + IST_OFFSET);
     const formattedCurrentDate = currentDateIST.toISOString().split("T")[0];
 
+    // Count total documents for pagination
+    const total = await hotelModel.countDocuments(filters);
+
+    // Apply pagination with skip and limit
+    const hotels = await hotelModel.find(filters)
+      .skip(skip)
+      .limit(parseInt(limit))
+      .lean();
+
     // Update room prices based on monthly data
-    acceptedHotels.forEach((hotel) => {
+    hotels.forEach((hotel) => {
       hotel.rooms.forEach((room) => {
         const matchingMonthlyEntry = monthlyData.find((data) => {
-          const startDate = new Date(data.startDate);
-          const endDate = new Date(data.endDate);
-
           return (
             data.hotelId === hotel.hotelId.toString() &&
             data.roomId === room.roomId &&
@@ -612,14 +735,20 @@ const getHotelsByFilters = async (req, res) => {
           );
         });
 
-        // If there's a matching monthly entry, update the room price
         if (matchingMonthlyEntry) {
           room.price = matchingMonthlyEntry.monthPrice;
         }
       });
     });
 
-    res.status(200).json({ success: true, data: acceptedHotels });
+    res.status(200).json({ 
+      success: true, 
+      data: hotels,
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(total / parseInt(limit))
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, error: "Internal Server Error" });
@@ -654,27 +783,16 @@ async function checkAvailability({ hotelId, checkInDate, checkOutDate }) {
 
 const getHotelsState = async function (req, res) {
   try {
-    const getState = await hotelModel.find();
-
-    // Use Set to keep track of unique state names
     const uniqueStatesSet = new Set();
-
-    const finalData = getState.reduce((acc, stateData) => {
-      const stateName = stateData.state;
-
-      // Check if the state name is not already in the Set
-      if (!uniqueStatesSet.has(stateName)) {
-        // Add state name to the Set
-        uniqueStatesSet.add(stateName);
-
-        // Add the state data to the result array
-        acc.push(stateName);
+    const cursor = hotelModel.find().select('state').cursor();
+    
+    for await (const hotel of cursor) {
+      if (hotel.state) {
+        uniqueStatesSet.add(hotel.state);
       }
+    }
 
-      return acc;
-    }, []);
-
-    res.json(finalData);
+    res.json(Array.from(uniqueStatesSet));
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -689,28 +807,16 @@ const getHotelsCityByState = async function (req, res) {
       return res.status(400).json({ error: "State parameter is missing" });
     }
 
-    const hotelsInState = await hotelModel.find({ state });
-
-    // Use Set to keep track of unique city names
     const uniqueCitiesSet = new Set();
-
-    // Extracting only the 'city' field from each document and filtering out duplicates
-    const cityData = hotelsInState.reduce((acc, hotel) => {
-      const cityName = hotel.city;
-
-      // Check if the city name is not already in the Set
-      if (!uniqueCitiesSet.has(cityName)) {
-        // Add city name to the Set
-        uniqueCitiesSet.add(cityName);
-
-        // Add the city name to the result array
-        acc.push(cityName);
+    const cursor = hotelModel.find({ state }).select('city').cursor();
+    
+    for await (const hotel of cursor) {
+      if (hotel.city) {
+        uniqueCitiesSet.add(hotel.city);
       }
+    }
 
-      return acc;
-    }, []);
-
-    res.json(cityData);
+    res.json(Array.from(uniqueCitiesSet));
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -718,16 +824,21 @@ const getHotelsCityByState = async function (req, res) {
 };
 
 const getHotelsCity = async (req, res) => {
-  const fetchCity = await hotelModel.find();
-  const finalData = fetchCity.filter((city) => city.isAccepted === true);
-  const uniqueCities = new Set();
-  finalData.forEach((hotel) => {
-    if (hotel.city) {
-      uniqueCities.add(hotel.city);
+  try {
+    const uniqueCities = new Set();
+    const cursor = hotelModel.find({ isAccepted: true }).select('city').cursor();
+    
+    for await (const hotel of cursor) {
+      if (hotel.city) {
+        uniqueCities.add(hotel.city);
+      }
     }
-  });
-  const cityArray = Array.from(uniqueCities);
-  res.status(200).json(cityArray);
+    
+    res.status(200).json(Array.from(uniqueCities));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
 };
 //=================================Update price monthly============================================
 const monthlyPrice = async function (req, res) {
@@ -770,12 +881,20 @@ cron.schedule("0 0 1 * *", async () => {
 //=========================================list of applied coupons hotel==========================
 const getCouponsAppliedHotels = async (req, res) => {
   try {
-    // Find hotels where at least one room has isOffer: true
-    const hotelsWithOfferRooms = await hotelModel.find({
-      "rooms.isOffer": true,
-    });
-
-    res.status(200).json(hotelsWithOfferRooms);
+    res.setHeader('Content-Type', 'application/json');
+    res.write('[');
+    let first = true;
+    
+    const cursor = hotelModel.find({ "rooms.isOffer": true }).cursor();
+    
+    for await (const hotel of cursor) {
+      if (!first) res.write(',');
+      res.write(JSON.stringify(hotel));
+      first = false;
+    }
+    
+    res.write(']');
+    res.end();
   } catch (error) {
     console.error("Error fetching hotels with offers:", error);
     res.status(500).json({ message: "Error fetching hotels", error });
