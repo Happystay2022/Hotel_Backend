@@ -1,10 +1,22 @@
 const mongoose = require("mongoose");
 
+const passengerSchema = new mongoose.Schema(
+  {
+    type: { type: String, enum: ["adult", "child"], required: true },
+    fullName: { type: String, trim: true },
+    gender: { type: String, enum: ["male", "female", "other"] },
+    dateOfBirth: { type: Date }, // mainly for child
+  },
+  { _id: false }
+);
+
 const tourBookingSchema = new mongoose.Schema(
   {
-    bookingId: {
+    // public booking code (PNR style)
+    bookingCode: {
       type: String,
       unique: true,
+      index: true,
       default: () =>
         [...Array(10)]
           .map(() => {
@@ -13,41 +25,76 @@ const tourBookingSchema = new mongoose.Schema(
           })
           .join(""),
     },
-    userId: { type: String, required: true },
-    travelId: { type: String, required: true },
-    visitngPlaces: { type: String },
-    travelAgencyName: { type: String },
-    country: { type: String },
+
+    // relations
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    tourId: { type: mongoose.Schema.Types.ObjectId, ref: "Tour", required: true },
+
+    // selected vehicle (Tour.vehicles subdoc _id)
+    vehicleId: { type: mongoose.Schema.Types.ObjectId, required: true },
+
+    // selected seats (UI -> backend)
+    seats: { type: [String], default: [] }, // ["1A","1B"] etc.
+
+    // booking meta
+    status: {
+      type: String,
+      enum: ["pending", "held", "confirmed", "cancelled", "failed"],
+      default: "pending",
+      index: true,
+    },
+
+    // travellers / counts (keep counts even if passenger list not provided)
+    numberOfAdults: { type: Number, default: 1, min: 0 },
+    numberOfChildren: { type: Number, default: 0, min: 0 },
+    passengers: { type: [passengerSchema], default: [] },
+
     customizable: { type: Boolean, default: false },
-    numberOfAdults: { type: Number },
-    numberOfChildren: { type: Number },
-    childDateOfBirth: [Date],
-    childPrices: [Number],
-    tourStartDate: { type: Date },
+
+    // snapshot fields (so booking stays same even if Tour changes later)
+    travelAgencyName: { type: String },
+    visitngPlaces: { type: String },
+    country: { type: String },
     state: { type: String },
     city: { type: String },
     themes: { type: String },
-    price: { type: Number },
+
+    tourStartDate: { type: Date }, // if you need
+
     nights: { type: Number },
     days: { type: Number },
     from: { type: Date },
     to: { type: Date },
+
+    // pricing snapshot
+    basePrice: { type: Number, default: 0 },   // tour price
+    seatPrice: { type: Number, default: 0 },   // (optional) seat add-on
+    tax: { type: Number, default: 0 },
+    discount: { type: Number, default: 0 },
+    totalAmount: { type: Number, default: 0 },
+
+    // optional: store policy snapshot
     amenities: [String],
     inclusion: [String],
     exclusion: [String],
-    termsAndConditions: {
-      type: Map,
-      of: String,
+    termsAndConditions: { type: Map, of: String }, // Map type supported [web:60]
+    dayWise: [{ day: Number, description: String }],
+
+    // payment snapshot (optional)
+    payment: {
+      provider: String,
+      orderId: String,
+      paymentId: String,
+      signature: String,
+      paidAt: Date,
     },
-    dayWise: [
-      {
-        day: { type: Number },
-        description: { type: String },
-      },
-    ],
   },
   { timestamps: true, strict: false }
 );
+
+// helpful indexes
+tourBookingSchema.index({ userId: 1, createdAt: -1 });
+tourBookingSchema.index({ tourId: 1, vehicleId: 1, createdAt: -1 });
 
 const TourBooking = mongoose.model("TourBooking", tourBookingSchema);
 module.exports = TourBooking;

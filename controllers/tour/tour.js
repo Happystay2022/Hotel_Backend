@@ -1,126 +1,147 @@
 const Tour = require("../../models/tour/tour");
 
+function toTermsMap(termsAndConditions) {
+  if (!termsAndConditions) return undefined;
+  if (termsAndConditions instanceof Map) return termsAndConditions;
+  if (typeof termsAndConditions === "string") {
+    try {
+      const parsed = JSON.parse(termsAndConditions);
+      if (parsed && typeof parsed === "object") return new Map(Object.entries(parsed));
+    } catch (_) {
+      return undefined;
+    }
+  }
+  if (typeof termsAndConditions === "object") return new Map(Object.entries(termsAndConditions));
+  return undefined;
+}
+
+function normalizeVehicles(input) {
+  if (!input) return undefined;
+  let vehicles = input;
+
+  if (typeof vehicles === "string") {
+    try {
+      vehicles = JSON.parse(vehicles);
+    } catch (_) {
+      return undefined;
+    }
+  }
+
+  if (!Array.isArray(vehicles)) return undefined;
+
+  return vehicles.map(v => ({
+    _id: v._id,
+    name: v.name,
+    vehicleNumber: v.vehicleNumber,
+    totalSeats: v.totalSeats,
+    seatLayout: Array.isArray(v.seatLayout) ? v.seatLayout : [],
+    pricePerSeat: v.pricePerSeat ?? 0,
+    isActive: v.isActive ?? true,
+  }));
+}
+
 exports.createTravel = async (req, res) => {
   try {
-    const { termsAndConditions, ...body } = req.body;
     const images = req.files ? req.files.map((file) => file.location) : [];
+    const body = { ...req.body };
 
-    if (termsAndConditions && typeof termsAndConditions === "object") {
-      req.body.termsAndConditions = new Map(Object.entries(termsAndConditions));
-    }
+    const termsMap = toTermsMap(body.termsAndConditions);
+    if (termsMap) body.termsAndConditions = termsMap;
 
-    const created = await Tour.create({
-      ...body,
-      images,
-      termsAndConditions: req.body.termsAndConditions,
-    });
+    const vehicles = normalizeVehicles(body.vehicles);
+    if (vehicles) body.vehicles = vehicles;
 
-    res.status(201).json({ success: true, data: created });
+    const created = await Tour.create({ ...body, images });
+    return res.status(201).json({ success: true, data: created });
   } catch (error) {
-    console.error(error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to create travel" });
+    return res.status(500).json({ success: false, message: "Failed to create travel" });
   }
 };
 
-exports.updateTour = async function (req, res) {
+exports.updateTour = async (req, res) => {
   const { id } = req.params;
-  const { termsAndConditions, ...body } = req.body;
 
   try {
-    if (termsAndConditions && typeof termsAndConditions === "object") {
-      req.body.termsAndConditions = new Map(Object.entries(termsAndConditions));
-    }
+    const body = { ...req.body };
+
+    const termsMap = toTermsMap(body.termsAndConditions);
+    if (termsMap) body.termsAndConditions = termsMap;
+
+    const vehicles = normalizeVehicles(body.vehicles);
+    if (vehicles) body.vehicles = vehicles;
+
+    const updated = await Tour.findByIdAndUpdate(id, body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updated) return res.status(404).json({ success: false, message: "Tour not found" });
+    return res.status(200).json({ success: true, data: updated });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Failed to update travel" });
+  }
+};
+
+exports.changeTourImage = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const newImages = req.files ? req.files.map((file) => file.location) : [];
 
     const updated = await Tour.findByIdAndUpdate(
       id,
-      {
-        ...body,
-        termsAndConditions: req.body.termsAndConditions,
-      },
-      { new: true },
+      { $push: { images: { $each: newImages } } },
+      { new: true, runValidators: true }
     );
 
-    res.status(200).json({ success: true, data: updated });
+    if (!updated) return res.status(404).json({ success: false, message: "Tour not found" });
+    return res.status(200).json({ success: true, data: updated });
   } catch (error) {
-    console.error(error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to update travel" });
+    return res.status(500).json({ success: false, message: "Failed to update travel images" });
   }
 };
-exports.changeTourImage = async function (req, res) {
-    const { id } = req.params;
-    try {
-      const newImages = req.files ? req.files.map(file => file.location) : [];
-  
-      const tour = await Tour.findById(id);
-      if (!tour) {
-        return res.status(404).json({ success: false, message: "Tour not found" });
-      }
-  
-      // Combine old and new images
-      const updatedImages = [...tour.images, ...newImages];
-  
-      tour.images = updatedImages;
-      await tour.save();
-  
-      res.status(200).json({ success: true, data: tour });
-    } catch (error) {
-      console.error("Image update error:", error);
-      res.status(500).json({ success: false, message: "Failed to update travel images" });
-    }
-  };
-  
-exports.deleteTourImage = async (req, res) => {
-    const { id } = req.params;
-    const { index } = req.body; // Accept index to delete (e.g., 1 for second image)
-  
-    try {
-      const tour = await Tour.findById(id);
-      if (!tour) {
-        return res.status(404).json({ message: "Tour not found" });
-      }
-  
-      if (!Array.isArray(tour.images) || tour.images.length === 0) {
-        return res.status(400).json({ message: "No images to delete" });
-      }
-  
-      if (index < 0 || index >= tour.images.length) {
-        return res.status(400).json({ message: "Invalid image index" });
-      }
-  
-      // Remove the image at the given index
-      const removedImage = tour.images.splice(index, 1); // modifies array in place
-  
-      await tour.save();
-  
-      res.status(200).json({ message: "Image deleted", removed: removedImage[0], remaining: tour.images });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ message: "Server error while deleting image" });
-    }
-  };
-  
 
-exports.sortByOrder = async function (req, res) {
+exports.deleteTourImage = async (req, res) => {
+  const { id } = req.params;
+  const { index } = req.body;
+
+  try {
+    const tour = await Tour.findById(id);
+    if (!tour) return res.status(404).json({ message: "Tour not found" });
+
+    const idx = Number(index);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= (tour.images?.length || 0)) {
+      return res.status(400).json({ message: "Invalid image index" });
+    }
+
+    const removed = tour.images[idx];
+    tour.images.splice(idx, 1);
+    await tour.save();
+
+    return res.status(200).json({
+      message: "Image deleted",
+      removed,
+      remaining: tour.images,
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Server error while deleting image" });
+  }
+};
+
+exports.sortByOrder = async (req, res) => {
   try {
     const { sort } = req.query;
     let sortOrder = 1;
+
     if (sort === "desc") sortOrder = -1;
     else if (sort !== "asc") {
-      return res
-        .status(400)
-        .json({ message: 'Invalid sort parameter. Use "asc" or "desc".' });
+      return res.status(400).json({ message: 'Invalid sort parameter. Use "asc" or "desc".' });
     }
 
-    const travels = await Tour.find({ isAccepted: true }).sort({
-      price: sortOrder,
-    });
-    res.json(travels);
+    const travels = await Tour.find({ isAccepted: true }).sort({ price: sortOrder });
+    return res.json(travels);
   } catch (error) {
-    res.status(500).json({ message: "Error fetching travels", error });
+    return res.status(500).json({ message: "Error fetching travels", error: error.message });
   }
 };
 
@@ -130,15 +151,13 @@ exports.sortByPrice = async (req, res) => {
   try {
     const query = { isAccepted: true };
 
-    if (minPrice) query.price = { $gte: minPrice };
-    if (maxPrice) query.price = { ...query.price, $lte: maxPrice };
+    if (minPrice != null) query.price = { ...query.price, $gte: Number(minPrice) };
+    if (maxPrice != null) query.price = { ...query.price, $lte: Number(maxPrice) };
 
     const findData = await Tour.find(query);
     return res.json(findData);
   } catch (error) {
-    return res
-      .status(500)
-      .json({ message: "Server error", error: error.message });
+    return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
@@ -146,55 +165,45 @@ exports.sortByDuration = async (req, res) => {
   const { minNights, maxNights } = req.query;
 
   try {
-    let query = { isAccepted: true };
-    if (minNights)
-      query.nights = { ...query.nights, $gte: parseInt(minNights) };
-    if (maxNights)
-      query.nights = { ...query.nights, $lte: parseInt(maxNights) };
+    const query = { isAccepted: true };
+
+    if (minNights != null) query.nights = { ...query.nights, $gte: Number(minNights) };
+    if (maxNights != null) query.nights = { ...query.nights, $lte: Number(maxNights) };
 
     const findData = await Tour.find(query);
     return res.json(findData);
   } catch (error) {
-    return res
-      .status(500)
-      .json({ message: "Server error", error: error.message });
+    return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 exports.sortBythemes = async (req, res) => {
   try {
     const { themes } = req.query;
-    const findData = await Tour.find({ themes: themes, isAccepted: true });
+    const findData = await Tour.find({ themes, isAccepted: true });
     return res.json(findData);
   } catch (error) {
-    return res
-      .status(500)
-      .json({ message: "Server error", error: error.message });
+    return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
-exports.getTourList = async function (_, res) {
+exports.getTourList = async (_, res) => {
   try {
-    const findData = await Tour.find({ isAccepted: true });
+    const findData = await Tour.find({ isAccepted: true }).sort({ createdAt: -1 });
     return res.status(200).json(findData);
   } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: error.message });
+    return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
 exports.getTourById = async (req, res) => {
   try {
     const { id } = req.params;
-    const findData = await Tour.findOne({ _id: id });
+    const findData = await Tour.findById(id);
+    if (!findData) return res.status(404).json({ message: "Tour not found" });
     return res.status(200).json(findData);
   } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: error.message });
+    return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
@@ -204,53 +213,46 @@ exports.getTourByOwner = async (req, res) => {
     const findData = await Tour.find({
       agencyEmail: { $regex: email, $options: "i" },
       isAccepted: true,
-    });
+    }).sort({ createdAt: -1 });
+
     return res.status(200).json(findData);
   } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: error.message });
+    return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
-exports.getByCity = async function (req, res) {
+exports.getByCity = async (req, res) => {
   const { city } = req.query;
+
   try {
     const query = city
       ? { city: { $regex: city, $options: "i" }, isAccepted: true }
       : { isAccepted: true };
 
-    const results = await Tour.find(query);
-    res.status(200).json({ success: true, data: results });
+    const results = await Tour.find(query).sort({ createdAt: -1 });
+    return res.status(200).json({ success: true, data: results });
   } catch (error) {
-    console.error(error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to retrieve data" });
+    return res.status(500).json({ success: false, message: "Failed to retrieve data" });
   }
 };
 
 exports.getAllCities = async (req, res) => {
   try {
-    const findAll = await Tour.find({ isAccepted: true });
-    if (findAll && findAll.length > 0) {
-      const cities = [...new Set(findAll.map((travel) => travel.city))];
-      res.status(200).json(cities);
-    } else {
-      res.status(404).json({ message: "No cities found." });
-    }
+    const findAll = await Tour.find({ isAccepted: true }).select("city");
+    const cities = [...new Set((findAll || []).map((t) => t.city).filter(Boolean))];
+
+    if (cities.length === 0) return res.status(404).json({ message: "No cities found." });
+    return res.status(200).json(cities);
   } catch (error) {
-    return res.status(500).json("It seems there's an error!");
+    return res.status(500).json({ message: "It seems there's an error!" });
   }
 };
 
 exports.getRequestedTour = async (req, res) => {
   try {
-    const requestedTravels = await Tour.find({ isAccepted: false });
-    res.status(200).json(requestedTravels);
+    const requestedTravels = await Tour.find({ isAccepted: false }).sort({ createdAt: -1 });
+    return res.status(200).json(requestedTravels);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    return res.status(500).json({ message: "Server error", error: error.message });
   }
 };
