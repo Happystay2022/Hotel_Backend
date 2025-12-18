@@ -5,6 +5,7 @@ const vehicleSchema = new mongoose.Schema(
     name: { type: String, required: true },              // e.g. "Innova"
     vehicleNumber: { type: String },                     // optional
     totalSeats: { type: Number, required: true, min: 1 },
+    seaterType: { type: String },                        // e.g. "2x2", "2x3", "3x2", "2x1" - seating configuration
     seatLayout: { type: [String], default: [] },         // e.g. ["1A","1B","2A"...]
     pricePerSeat: { type: Number, default: 0 },          // optional add-on
     isActive: { type: Boolean, default: true },

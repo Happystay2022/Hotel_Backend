@@ -53,8 +53,8 @@ exports.getVehicleSeats = async (req, res) => {
     const bookedAgg = await TourBooking.aggregate([
       {
         $match: {
-          tourId: tour._id,
-          vehicleId: vehicle._id,
+          tourId: String(tour._id),
+          vehicleId: String(vehicle._id),
           status: { $ne: "cancelled" }
         }
       },

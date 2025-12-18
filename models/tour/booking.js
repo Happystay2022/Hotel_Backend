@@ -26,17 +26,11 @@ const tourBookingSchema = new mongoose.Schema(
           .join(""),
     },
 
-    // relations
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    tourId: { type: mongoose.Schema.Types.ObjectId, ref: "Tour", required: true },
+    userId: { type: String, required: true, index: true },
+    tourId: { type: String, required: true, index: true },
+    vehicleId: { type: String, required: true },
 
-    // selected vehicle (Tour.vehicles subdoc _id)
-    vehicleId: { type: mongoose.Schema.Types.ObjectId, required: true },
-
-    // selected seats (UI -> backend)
     seats: { type: [String], default: [] }, // ["1A","1B"] etc.
-
-    // booking meta
     status: {
       type: String,
       enum: ["pending", "held", "confirmed", "cancelled", "failed"],
@@ -44,7 +38,6 @@ const tourBookingSchema = new mongoose.Schema(
       index: true,
     },
 
-    // travellers / counts (keep counts even if passenger list not provided)
     numberOfAdults: { type: Number, default: 1, min: 0 },
     numberOfChildren: { type: Number, default: 0, min: 0 },
     passengers: { type: [passengerSchema], default: [] },
@@ -95,6 +88,8 @@ const tourBookingSchema = new mongoose.Schema(
 // helpful indexes
 tourBookingSchema.index({ userId: 1, createdAt: -1 });
 tourBookingSchema.index({ tourId: 1, vehicleId: 1, createdAt: -1 });
+tourBookingSchema.index({ bookingCode: 1 }, { unique: true });
+tourBookingSchema.index({ status: 1 });
 
 const TourBooking = mongoose.model("TourBooking", tourBookingSchema);
 module.exports = TourBooking;

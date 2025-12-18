@@ -563,8 +563,8 @@ const getHotelsByFilters = async (req, res) => {
       maxPrice,
       checkInDate,
       checkOutDate,
-      page = 1,
-      limit = 10,
+      page,
+      limit,
     } = req.query;
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
