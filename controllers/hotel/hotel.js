@@ -174,14 +174,17 @@ const deleteHotelImages = async function (req, res) {
   }
 
   try {
-   
+    // Use $pull to remove the image URL from the images array
     const hotel = await hotelModel.findOneAndUpdate(
-      { hotelId, images: imageUrl },)  
+      { hotelId: hotelId },
+      { $pull: { images: imageUrl } },
+      { new: true }
+    );
 
     if (!hotel) {
       return res
         .status(404)
-        .json({ message: "Hotel or Image URL not found" });
+        .json({ message: "Hotel not found" });
     }
 
     res.status(200).json({
