@@ -63,6 +63,10 @@ const ApplyUserCoupon = async (req, res) => {
       return res.status(404).json({ message: "Room not found in the specified hotel" });
     }
 
+    if (selectedRoom.countRooms <= 0) {
+      return res.status(400).json({ message: "Room is not available (sold out)" });
+    }
+
     const originalPrice = selectedRoom.price;
     const discountPrice = coupon.discountPrice;
     const finalPrice = originalPrice - discountPrice;

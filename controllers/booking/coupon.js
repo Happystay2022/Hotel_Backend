@@ -54,11 +54,11 @@ const ApplyCoupon = async (req, res) => {
       if (roomIds.length > 0) {
         // Filter only user-provided roomIds with isOffer !== true
         applicableRooms = hotel.rooms.filter(
-          (room) => roomIds.includes(room.roomId) && room.isOffer !== true,
+          (room) => roomIds.includes(room.roomId) && room.isOffer !== true && room.countRooms > 0,
         );
       } else {
         // Get all rooms without offer
-        applicableRooms = hotel.rooms.filter((room) => room.isOffer !== true);
+        applicableRooms = hotel.rooms.filter((room) => room.isOffer !== true && room.countRooms > 0);
       }
 
       if (applicableRooms.length === 0) continue;

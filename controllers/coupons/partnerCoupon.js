@@ -55,7 +55,7 @@ const ApplyPartnerCoupon = async (req, res) => {
       if (!hotel) continue;
 
       for (const roomId of roomIds) {
-        const selectedRoom = hotel.rooms.find((room) => room.roomId === roomId);
+        const selectedRoom = hotel.rooms.find((room) => room.roomId === roomId && room.countRooms > 0);
         if (!selectedRoom) continue;
 
         const discountedPrice = selectedRoom.price - coupon.discountPrice;
