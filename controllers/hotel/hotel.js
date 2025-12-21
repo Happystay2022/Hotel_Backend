@@ -5,6 +5,7 @@ const { DateTime } = require("luxon"); // Add this line at the top
 
 const bookingsModel = require("../../models/booking/booking");
 const monthly = require("../../models/booking/monthly");
+const gstModel = require("../../models/GST/gst");
 const { sendCustomEmail } = require("../../nodemailer/nodemailer");
 const createHotel = async (req, res) => {
   try {
@@ -388,20 +389,196 @@ const getByQuery = async (req, res) => {
 
 const getAllHotels = async (req, res) => {
   try {
+    const { checkInDate, checkOutDate, countRooms } = req.query;
+    const requestedRooms = parseInt(countRooms) || 1;
+
+    // Fetch all required data in parallel
+    const [monthlyData, gstData, allBookings] = await Promise.all([
+      monthly.find().lean(),
+      gstModel.findOne({ type: "Hotel" }).lean(),
+      // Only fetch bookings if dates are provided
+      (checkInDate && checkOutDate) ? bookingsModel.find({
+        bookingStatus: { $nin: ["Cancelled", "Failed"] },
+        $or: [
+          {
+            checkInDate: { $lte: checkOutDate },
+            checkOutDate: { $gte: checkInDate }
+          }
+        ]
+      }).select('hotelId numRooms roomDetails checkInDate checkOutDate').lean() : Promise.resolve([])
+    ]);
+
+    // GST calculation helper
+    const calculateGST = (price) => {
+      if (!gstData) return { gstPercent: 0, gstAmount: 0 };
+      
+      let gstPercent = 0;
+      if (price <= gstData.gstMinThreshold) {
+        gstPercent = 0;
+      } else if (price <= gstData.gstMaxThreshold) {
+        gstPercent = 12;
+      } else {
+        gstPercent = gstData.gstPrice || 18;
+      }
+      
+      const gstAmount = Math.round((price * gstPercent) / 100);
+      return { gstPercent, gstAmount };
+    };
+
+    // Create a map of hotelId -> booked rooms
+    const bookedRoomsMap = {};
+    if (checkInDate && checkOutDate) {
+      allBookings.forEach(booking => {
+        const hotelId = booking.hotelId;
+        if (!bookedRoomsMap[hotelId]) {
+          bookedRoomsMap[hotelId] = { totalBooked: 0, roomWise: {} };
+        }
+        bookedRoomsMap[hotelId].totalBooked += booking.numRooms || 0;
+        
+        if (booking.roomDetails && Array.isArray(booking.roomDetails)) {
+          booking.roomDetails.forEach(rd => {
+            if (rd.roomId) {
+              if (!bookedRoomsMap[hotelId].roomWise[rd.roomId]) {
+                bookedRoomsMap[hotelId].roomWise[rd.roomId] = 0;
+              }
+              bookedRoomsMap[hotelId].roomWise[rd.roomId] += 1;
+            }
+          });
+        }
+      });
+    }
+
+    // Process hotels with streaming
     res.setHeader('Content-Type', 'application/json');
     res.write('{"success":true,"data":[');
     let first = true;
+    
     const cursor = hotelModel.find().sort({ isAccepted: 1 }).cursor();
+    
     for await (const hotel of cursor) {
+      const hotelId = hotel.hotelId;
+      const bookedInfo = bookedRoomsMap[hotelId] || { totalBooked: 0, roomWise: {} };
+      
+      let totalRooms = 0;
+      let availableRooms = 0;
+      let lowestPrice = Infinity;
+      let lowestPriceWithGST = Infinity;
+      
+      // Process each room
+      const processedRooms = (hotel.rooms || []).map(room => {
+        const roomId = room.roomId || room._id?.toString();
+        const roomCount = room.countRooms || 0;
+        const bookedCount = bookedInfo.roomWise[roomId] || 0;
+        const available = Math.max(0, roomCount - bookedCount);
+        
+        totalRooms += roomCount;
+        availableRooms += available;
+        
+        // Get the price - check for monthly special pricing first
+        let finalPrice = room.price || 0;
+        let isSpecialPrice = false;
+        let monthlyPriceDetails = null;
+        
+        if (checkInDate && checkOutDate && monthlyData.length > 0) {
+          const matchingMonthlyEntry = monthlyData.find((data) => {
+            // Check if monthly price period overlaps with booking dates
+            return (
+              data.hotelId === hotelId &&
+              data.roomId === roomId &&
+              data.startDate <= checkOutDate &&
+              data.endDate >= checkInDate
+            );
+          });
+          
+          if (matchingMonthlyEntry) {
+            finalPrice = matchingMonthlyEntry.monthPrice;
+            isSpecialPrice = true;
+            monthlyPriceDetails = {
+              monthPrice: matchingMonthlyEntry.monthPrice,
+              startDate: matchingMonthlyEntry.startDate,
+              endDate: matchingMonthlyEntry.endDate,
+              validForBooking: true
+            };
+          }
+        }
+        
+        // Apply offer discount if any
+        let offerPrice = finalPrice;
+        let offerApplied = false;
+        if (room.isOffer && room.offerPriceLess > 0) {
+          const offerExpDate = room.offerExp ? new Date(room.offerExp) : null;
+          if (!offerExpDate || offerExpDate >= new Date()) {
+            offerPrice = finalPrice - room.offerPriceLess;
+            offerApplied = true;
+          }
+        }
+        
+        // Calculate GST
+        const { gstPercent, gstAmount } = calculateGST(offerPrice);
+        const priceWithGST = offerPrice + gstAmount;
+        
+        // Track lowest price
+        if (available > 0 && offerPrice < lowestPrice) {
+          lowestPrice = offerPrice;
+          lowestPriceWithGST = priceWithGST;
+        }
+        
+        return {
+          ...room,
+          originalPrice: room.price,
+          finalPrice: offerPrice,
+          isSpecialPrice,
+          offerApplied,
+          monthlyPriceDetails,
+          gstPercent,
+          gstAmount,
+          priceWithGST,
+          totalCount: roomCount,
+          bookedCount,
+          availableCount: available,
+          isAvailable: available > 0
+        };
+      });
+      
+      // Determine hotel availability status
+      const isFullyBooked = availableRooms < requestedRooms;
+      const availabilityStatus = isFullyBooked ? "Fully Booked" : "Available";
+      
+      const processedHotel = {
+        ...hotel.toObject(),
+        rooms: processedRooms,
+        availability: checkInDate && checkOutDate ? {
+          status: availabilityStatus,
+          totalRooms,
+          availableRooms,
+          bookedRooms: totalRooms - availableRooms,
+          requestedRooms,
+          canBook: !isFullyBooked
+        } : null,
+        pricing: {
+          startingFrom: lowestPrice === Infinity ? 0 : lowestPrice,
+          startingFromWithGST: lowestPriceWithGST === Infinity ? 0 : lowestPriceWithGST,
+          gstApplicable: gstData ? true : false,
+          gstNote: gstData ? `GST @${gstData.gstPrice}% applicable on rooms above ₹${gstData.gstMaxThreshold}` : null
+        }
+      };
+      
       if (!first) res.write(',');
-      res.write(JSON.stringify(hotel));
+      res.write(JSON.stringify(processedHotel));
       first = false;
     }
-    res.write(']}');
+    
+    res.write('],"gstInfo":');
+    res.write(JSON.stringify(gstData ? {
+      minThreshold: gstData.gstMinThreshold,
+      maxThreshold: gstData.gstMaxThreshold,
+      defaultRate: gstData.gstPrice
+    } : null));
+    res.write('}');
     res.end();
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: "Internal Server Error" });
+    console.error("Error in getAllHotels:", error);
+    res.status(500).json({ success: false, error: "Internal Server Error", message: error.message });
   }
 };
 
@@ -427,13 +604,15 @@ const getHotels = async (req, res) => {
 //======================================get offers==========================================//
 const setOnFront = async (req, res) => {
   try {
+    const { checkInDate, checkOutDate } = req.query;
     const monthlyData = await monthly.find().lean();
 
-    // Get the current date in YYYY-MM-DD format (IST)
+    // Get the current date in YYYY-MM-DD format (IST) or use provided checkInDate
     const currentDate = new Date();
     const IST_OFFSET = 5.5 * 60 * 60 * 1000; // UTC+5:30
     const currentDateIST = new Date(currentDate.getTime() + IST_OFFSET);
-    const formattedCurrentDate = currentDateIST.toISOString().split("T")[0];
+    const formattedCurrentDate = checkInDate || currentDateIST.toISOString().split("T")[0];
+    const formattedCheckOutDate = checkOutDate || formattedCurrentDate;
 
     res.setHeader('Content-Type', 'application/json');
     res.write('[');
@@ -442,23 +621,33 @@ const setOnFront = async (req, res) => {
     const cursor = hotelModel.find({ onFront: true }).sort({ createdAt: -1 }).cursor();
     
     for await (const hotel of cursor) {
-      // Update room prices based on monthly data
-      hotel.rooms.forEach((room) => {
+      // Process rooms with monthly pricing
+      hotel.rooms = hotel.rooms.map((room) => {
         const matchingMonthlyEntry = monthlyData.find((data) => {
-          const startDate = new Date(data.startDate);
-          const endDate = new Date(data.endDate);
-
+          // Check if monthly price period overlaps with booking dates
           return (
             data.hotelId === hotel.hotelId.toString() &&
             data.roomId === room.roomId &&
-            formattedCurrentDate >= startDate.toISOString().split("T")[0] &&
-            formattedCurrentDate <= endDate.toISOString().split("T")[0]
+            data.startDate <= formattedCheckOutDate &&
+            data.endDate >= formattedCurrentDate
           );
         });
 
         if (matchingMonthlyEntry) {
-          room.price = matchingMonthlyEntry.monthPrice;
+          return {
+            ...room,
+            originalPrice: room.price,
+            price: matchingMonthlyEntry.monthPrice,
+            monthlyPriceDetails: {
+              monthPrice: matchingMonthlyEntry.monthPrice,
+              startDate: matchingMonthlyEntry.startDate,
+              endDate: matchingMonthlyEntry.endDate,
+              validForBooking: true
+            }
+          };
         }
+        
+        return room;
       });
 
       if (!first) res.write(',');
@@ -506,12 +695,183 @@ const getCity = async function (req, res) {
 const getHotelsById = async (req, res) => {
   try {
     const hotelId = req.params.hotelId;
+    const { checkInDate, checkOutDate, countRooms } = req.query;
+    const requestedRooms = parseInt(countRooms) || 1;
 
-    // Assuming you have the necessary models imported
-    const hotel = await hotelModel.findOne({ hotelId });
-    res.json(hotel);
+    // Fetch hotel data
+    const hotel = await hotelModel.findOne({ hotelId }).lean();
+    
+    if (!hotel) {
+      return res.status(404).json({ success: false, message: "Hotel not found" });
+    }
+
+    // Fetch all required data in parallel
+    const [monthlyData, gstData, allBookings] = await Promise.all([
+      monthly.find().lean(),
+      gstModel.findOne({ type: "Hotel" }).lean(),
+      // Only fetch bookings if dates are provided
+      (checkInDate && checkOutDate) ? bookingsModel.find({
+        hotelId: hotelId,
+        bookingStatus: { $nin: ["Cancelled", "Failed"] },
+        $or: [
+          {
+            checkInDate: { $lte: checkOutDate },
+            checkOutDate: { $gte: checkInDate }
+          }
+        ]
+      }).select('hotelId numRooms roomDetails checkInDate checkOutDate').lean() : Promise.resolve([])
+    ]);
+
+    // GST calculation helper
+    const calculateGST = (price) => {
+      if (!gstData) return { gstPercent: 0, gstAmount: 0 };
+      
+      let gstPercent = 0;
+      if (price <= gstData.gstMinThreshold) {
+        gstPercent = 0; // No GST for very low prices
+      } else if (price <= gstData.gstMaxThreshold) {
+        gstPercent = 12; // 12% GST for mid-range
+      } else {
+        gstPercent = gstData.gstPrice || 18; // 18% GST for high prices
+      }
+      
+      const gstAmount = Math.round((price * gstPercent) / 100);
+      return { gstPercent, gstAmount };
+    };
+
+    // Create a map of booked rooms
+    const bookedRoomsMap = {};
+    if (checkInDate && checkOutDate) {
+      allBookings.forEach(booking => {
+        if (booking.roomDetails && Array.isArray(booking.roomDetails)) {
+          booking.roomDetails.forEach(rd => {
+            if (rd.roomId) {
+              if (!bookedRoomsMap[rd.roomId]) {
+                bookedRoomsMap[rd.roomId] = 0;
+              }
+              bookedRoomsMap[rd.roomId] += 1;
+            }
+          });
+        }
+      });
+    }
+
+    // Process rooms with pricing, offers, GST, and availability
+    let totalRooms = 0;
+    let availableRooms = 0;
+    let lowestPrice = Infinity;
+    let lowestPriceWithGST = Infinity;
+
+    const processedRooms = (hotel.rooms || []).map(room => {
+      const roomId = room.roomId || room._id?.toString();
+      const roomCount = room.countRooms || 0;
+      const bookedCount = bookedRoomsMap[roomId] || 0;
+      const available = Math.max(0, roomCount - bookedCount);
+      
+      totalRooms += roomCount;
+      availableRooms += available;
+      
+      // Get the price - check for monthly special pricing first
+      let finalPrice = room.price || 0;
+      let isSpecialPrice = false;
+      let monthlyPriceDetails = null;
+      
+      if (checkInDate && checkOutDate && monthlyData.length > 0) {
+        const matchingMonthlyEntry = monthlyData.find((data) => {
+          // Check if monthly price period overlaps with booking dates
+          return (
+            data.hotelId === hotelId &&
+            data.roomId === roomId &&
+            data.startDate <= checkOutDate &&
+            data.endDate >= checkInDate
+          );
+        });
+        
+        if (matchingMonthlyEntry) {
+          finalPrice = matchingMonthlyEntry.monthPrice;
+          isSpecialPrice = true;
+          monthlyPriceDetails = {
+            monthPrice: matchingMonthlyEntry.monthPrice,
+            startDate: matchingMonthlyEntry.startDate,
+            endDate: matchingMonthlyEntry.endDate,
+            validForBooking: true
+          };
+        }
+      }
+      
+      // Apply offer discount if any
+      let offerPrice = finalPrice;
+      let offerApplied = false;
+      if (room.isOffer && room.offerPriceLess > 0) {
+        const offerExpDate = room.offerExp ? new Date(room.offerExp) : null;
+        if (!offerExpDate || offerExpDate >= new Date()) {
+          offerPrice = finalPrice - room.offerPriceLess;
+          offerApplied = true;
+        }
+      }
+      
+      // Calculate GST
+      const { gstPercent, gstAmount } = calculateGST(offerPrice);
+      const priceWithGST = offerPrice + gstAmount;
+      
+      // Track lowest price
+      if (available > 0 && offerPrice < lowestPrice) {
+        lowestPrice = offerPrice;
+        lowestPriceWithGST = priceWithGST;
+      }
+      
+      return {
+        ...room,
+        originalPrice: room.price,
+        finalPrice: offerPrice,
+        isSpecialPrice,
+        offerApplied,
+        monthlyPriceDetails,
+        gstPercent,
+        gstAmount,
+        priceWithGST,
+        totalCount: roomCount,
+        bookedCount,
+        availableCount: available,
+        isAvailable: available > 0
+      };
+    });
+
+    // Determine hotel availability status
+    const isFullyBooked = availableRooms < requestedRooms;
+    const availabilityStatus = isFullyBooked ? "Fully Booked" : "Available";
+
+    // Prepare response with all calculations
+    const responseData = {
+      ...hotel,
+      rooms: processedRooms,
+      availability: checkInDate && checkOutDate ? {
+        status: availabilityStatus,
+        totalRooms,
+        availableRooms,
+        bookedRooms: totalRooms - availableRooms,
+        requestedRooms,
+        canBook: !isFullyBooked,
+        checkInDate,
+        checkOutDate
+      } : null,
+      pricing: {
+        startingFrom: lowestPrice === Infinity ? 0 : lowestPrice,
+        startingFromWithGST: lowestPriceWithGST === Infinity ? 0 : lowestPriceWithGST,
+        gstApplicable: gstData ? true : false,
+        gstNote: gstData ? `GST @${gstData.gstPrice}% applicable on rooms above ₹${gstData.gstMaxThreshold}` : null
+      },
+      gstInfo: gstData ? {
+        minThreshold: gstData.gstMinThreshold,
+        maxThreshold: gstData.gstMaxThreshold,
+        defaultRate: gstData.gstPrice
+      } : null
+    };
+
+    res.json({ success: true, data: responseData });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Error in getHotelsById:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -563,40 +923,30 @@ const getHotelsByFilters = async (req, res) => {
       maxPrice,
       checkInDate,
       checkOutDate,
-      page,
-      limit,
+      page = 1,
+      limit = 10,
+      guests,
     } = req.query;
     
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 10;
+    const skip = (pageNum - 1) * limitNum;
+    const requestedRooms = parseInt(countRooms) || 1;
 
-    let filters = {};
+    let filters = { isAccepted: true };
 
-    // If no query filters are provided at all, return an empty array instead of fetching all hotels
+    // If no query filters are provided at all, return an empty array
     const hasAnyFilter = [
-      search,
-      starRating,
-      propertyType,
-      localId,
-      latitude,
-      longitude,
-      countRooms,
-      hotelCategory,
-      type,
-      bedTypes,
-      amenities,
-      unmarriedCouplesAllowed,
-      minPrice,
-      maxPrice,
-      checkInDate,
-      checkOutDate,
+      search, starRating, propertyType, localId, latitude, longitude,
+      countRooms, hotelCategory, type, bedTypes, amenities,
+      unmarriedCouplesAllowed, minPrice, maxPrice, checkInDate, checkOutDate,
     ].some((v) => v !== undefined && v !== null && String(v).trim() !== "");
 
     if (!hasAnyFilter) {
-      // No filters supplied — return empty result set
-      return res.status(200).json({ success: true, data: [] });
+      return res.status(200).json({ success: true, data: [], total: 0, page: pageNum, limit: limitNum });
     }
 
-    // Combined search input
+    // Build search filters
     if (search) {
       const searchPattern = new RegExp(search, "i");
       filters.$or = [
@@ -608,178 +958,240 @@ const getHotelsByFilters = async (req, res) => {
     }
 
     if (starRating) filters.starRating = starRating;
-    if (propertyType)
-      filters.propertyType = { $regex: new RegExp(propertyType, "i") };
+    if (propertyType) filters.propertyType = { $regex: new RegExp(propertyType, "i") };
     if (localId) filters.localId = localId;
-    if (hotelCategory)
-      filters.hotelCategory = { $regex: new RegExp(hotelCategory, "i") };
+    if (hotelCategory) filters.hotelCategory = { $regex: new RegExp(hotelCategory, "i") };
     if (latitude) filters.latitude = latitude;
     if (longitude) filters.longitude = longitude;
-    if (countRooms)
-      filters["rooms.countRooms"] = { $gte: parseInt(countRooms) };
     if (type) filters["rooms.type"] = { $regex: new RegExp(type, "i") };
-    if (bedTypes)
-      filters["rooms.bedTypes"] = { $regex: new RegExp(bedTypes, "i") };
-    if (amenities)
-      filters["amenities.amenities"] = { $in: amenities.split(",") };
-    if (unmarriedCouplesAllowed)
-      filters["policies.unmarriedCouplesAllowed"] = unmarriedCouplesAllowed;
+    if (bedTypes) filters["rooms.bedTypes"] = { $regex: new RegExp(bedTypes, "i") };
+    if (amenities) filters["amenities.amenities"] = { $in: amenities.split(",") };
+    if (unmarriedCouplesAllowed) filters["policies.unmarriedCouplesAllowed"] = unmarriedCouplesAllowed;
 
-    // Add minPrice and maxPrice filtering
-    if (minPrice || maxPrice) {
-      let priceFilter = {};
-      if (minPrice) priceFilter.$gte = parseFloat(minPrice);
-      if (maxPrice) priceFilter.$lte = parseFloat(maxPrice);
-      filters["rooms.price"] = priceFilter;
-    }
-
-    // Add isAccepted filter directly in query
-    filters.isAccepted = true;
-
-    // Get monthly data
-    const monthlyData = await monthly.find().lean();
-
-    // If checkInDate and checkOutDate are provided, check availability
-    if (checkInDate && checkOutDate) {
-      // Fetch all bookings for the date range in ONE query
-      const allBookings = await bookingsModel.find({
+    // Fetch all required data in parallel for performance
+    const [monthlyData, gstData, allBookings, allHotels] = await Promise.all([
+      monthly.find().lean(),
+      gstModel.findOne({ type: "Hotel" }).lean(),
+      // Only fetch bookings if dates are provided
+      (checkInDate && checkOutDate) ? bookingsModel.find({
+        bookingStatus: { $nin: ["Cancelled", "Failed"] },
         $or: [
           {
-            checkInDate: { $lte: new Date(checkOutDate) },
-            checkOutDate: { $gte: new Date(checkInDate) }
+            checkInDate: { $lte: checkOutDate },
+            checkOutDate: { $gte: checkInDate }
           }
         ]
-      }).select('hotelId numRooms').lean();
+      }).select('hotelId numRooms roomDetails checkInDate checkOutDate').lean() : Promise.resolve([]),
+      hotelModel.find(filters).lean()
+    ]);
 
-      // Create a map of hotelId -> total booked rooms
-      const bookedRoomsMap = {};
-      allBookings.forEach(booking => {
-        if (!bookedRoomsMap[booking.hotelId]) {
-          bookedRoomsMap[booking.hotelId] = 0;
-        }
-        bookedRoomsMap[booking.hotelId] += booking.numRooms;
-      });
-
-      const availableHotels = [];
-      let count = 0;
-      const cursor = hotelModel.find(filters).cursor();
+    // GST calculation helper
+    const calculateGST = (price) => {
+      if (!gstData) return { gstPercent: 0, gstAmount: 0 };
       
-      for await (const hotel of cursor) {
-        const totalRooms = hotel.rooms.reduce((total, room) => total + (room.countRooms || 0), 0);
-        const bookedRooms = bookedRoomsMap[hotel.hotelId] || 0;
-        const availableRooms = totalRooms - bookedRooms;
+      let gstPercent = 0;
+      if (price <= gstData.gstMinThreshold) {
+        gstPercent = 0; // No GST for very low prices
+      } else if (price <= gstData.gstMaxThreshold) {
+        gstPercent = 12; // 12% GST for mid-range
+      } else {
+        gstPercent = gstData.gstPrice || 18; // 18% GST for high prices
+      }
+      
+      const gstAmount = Math.round((price * gstPercent) / 100);
+      return { gstPercent, gstAmount };
+    };
 
-        if (availableRooms > 0) {
-          // Update room prices based on monthly data
-          hotel.rooms.forEach((room) => {
-            const matchingMonthlyEntry = monthlyData.find((data) => {
-              return (
-                data.hotelId === hotel.hotelId.toString() &&
-                data.roomId === room.roomId &&
-                data.startDate <= new Date() &&
-                data.endDate >= new Date()
-              );
-            });
-
-            if (matchingMonthlyEntry) {
-              room.price = matchingMonthlyEntry.monthPrice;
+    // Create a map of hotelId -> booked rooms count per room type
+    const bookedRoomsMap = {};
+    if (checkInDate && checkOutDate) {
+      allBookings.forEach(booking => {
+        const hotelId = booking.hotelId;
+        if (!bookedRoomsMap[hotelId]) {
+          bookedRoomsMap[hotelId] = { totalBooked: 0, roomWise: {} };
+        }
+        bookedRoomsMap[hotelId].totalBooked += booking.numRooms || 0;
+        
+        // Track room-wise bookings
+        if (booking.roomDetails && Array.isArray(booking.roomDetails)) {
+          booking.roomDetails.forEach(rd => {
+            if (rd.roomId) {
+              if (!bookedRoomsMap[hotelId].roomWise[rd.roomId]) {
+                bookedRoomsMap[hotelId].roomWise[rd.roomId] = 0;
+              }
+              bookedRoomsMap[hotelId].roomWise[rd.roomId] += 1;
             }
           });
-
-          // Apply pagination
-          if (count >= skip && availableHotels.length < parseInt(limit)) {
-            availableHotels.push(hotel);
-          }
-          count++;
-          
-          // Stop if we've collected enough results
-          if (availableHotels.length >= parseInt(limit)) {
-            break;
-          }
         }
-      }
-
-      return res.status(200).json({ 
-        success: true, 
-        data: availableHotels,
-        total: count,
-        page: parseInt(page),
-        limit: parseInt(limit)
       });
     }
 
-    // Get current date in YYYY-MM-DD format (IST)
-    const currentDate = new Date();
-    const IST_OFFSET = 5.5 * 60 * 60 * 1000; // UTC+5:30
-    const currentDateIST = new Date(currentDate.getTime() + IST_OFFSET);
-    const formattedCurrentDate = currentDateIST.toISOString().split("T")[0];
-
-    // Count total documents for pagination
-    const total = await hotelModel.countDocuments(filters);
-
-    // Apply pagination with skip and limit
-    const hotels = await hotelModel.find(filters)
-      .skip(skip)
-      .limit(parseInt(limit))
-      .lean();
-
-    // Update room prices based on monthly data
-    hotels.forEach((hotel) => {
-      hotel.rooms.forEach((room) => {
-        const matchingMonthlyEntry = monthlyData.find((data) => {
-          return (
-            data.hotelId === hotel.hotelId.toString() &&
-            data.roomId === room.roomId &&
-            formattedCurrentDate >= data.startDate &&
-            formattedCurrentDate <= data.endDate
-          );
-        });
-
-        if (matchingMonthlyEntry) {
-          room.price = matchingMonthlyEntry.monthPrice;
+    // Process hotels with availability, pricing, and GST
+    const processedHotels = [];
+    
+    for (const hotel of allHotels) {
+      const hotelId = hotel.hotelId;
+      const bookedInfo = bookedRoomsMap[hotelId] || { totalBooked: 0, roomWise: {} };
+      
+      // Calculate total rooms and available rooms
+      let totalRooms = 0;
+      let availableRooms = 0;
+      let lowestPrice = Infinity;
+      let lowestPriceWithGST = Infinity;
+      
+      // Process each room
+      const processedRooms = (hotel.rooms || []).map(room => {
+        const roomId = room.roomId || room._id?.toString();
+        const roomCount = room.countRooms || 0;
+        const bookedCount = bookedInfo.roomWise[roomId] || 0;
+        const available = Math.max(0, roomCount - bookedCount);
+        
+        totalRooms += roomCount;
+        availableRooms += available;
+        
+        // Get the price - check for monthly special pricing first
+        let finalPrice = room.price || 0;
+        let isSpecialPrice = false;
+        let monthlyPriceDetails = null;
+        
+        if (checkInDate && checkOutDate && monthlyData.length > 0) {
+          const matchingMonthlyEntry = monthlyData.find((data) => {
+            // Check if monthly price period overlaps with booking dates
+            return (
+              data.hotelId === hotelId &&
+              data.roomId === roomId &&
+              data.startDate <= checkOutDate &&
+              data.endDate >= checkInDate
+            );
+          });
+          
+          if (matchingMonthlyEntry) {
+            finalPrice = matchingMonthlyEntry.monthPrice;
+            isSpecialPrice = true;
+            monthlyPriceDetails = {
+              monthPrice: matchingMonthlyEntry.monthPrice,
+              startDate: matchingMonthlyEntry.startDate,
+              endDate: matchingMonthlyEntry.endDate,
+              validForBooking: true
+            };
+          }
+        }
+        
+        // Apply offer discount if any
+        let offerPrice = finalPrice;
+        if (room.isOffer && room.offerPriceLess > 0) {
+          const offerExpDate = room.offerExp ? new Date(room.offerExp) : null;
+          if (!offerExpDate || offerExpDate >= new Date()) {
+            offerPrice = finalPrice - room.offerPriceLess;
+          }
+        }
+        
+        // Calculate GST
+        const { gstPercent, gstAmount } = calculateGST(offerPrice);
+        const priceWithGST = offerPrice + gstAmount;
+        
+        // Track lowest price
+        if (available > 0 && offerPrice < lowestPrice) {
+          lowestPrice = offerPrice;
+          lowestPriceWithGST = priceWithGST;
+        }
+        
+        return {
+          ...room,
+          originalPrice: room.price,
+          finalPrice: offerPrice,
+          isSpecialPrice,
+          monthlyPriceDetails,
+          gstPercent,
+          gstAmount,
+          priceWithGST,
+          totalCount: roomCount,
+          bookedCount,
+          availableCount: available,
+          isAvailable: available > 0
+        };
+      });
+      
+      // Determine hotel availability status
+      const isFullyBooked = availableRooms < requestedRooms;
+      const availabilityStatus = isFullyBooked ? "Fully Booked" : "Available";
+      
+      // Apply price filters after calculating final prices
+      if (minPrice || maxPrice) {
+        const minP = parseFloat(minPrice) || 0;
+        const maxP = parseFloat(maxPrice) || Infinity;
+        
+        // Check if any room falls within price range
+        const hasRoomInRange = processedRooms.some(room => 
+          room.finalPrice >= minP && room.finalPrice <= maxP && room.availableCount > 0
+        );
+        
+        if (!hasRoomInRange) continue; // Skip this hotel
+      }
+      
+      // Apply countRooms filter
+      if (countRooms && availableRooms < requestedRooms) {
+        // Still include hotel but mark as fully booked
+      }
+      
+      processedHotels.push({
+        ...hotel,
+        rooms: processedRooms,
+        availability: {
+          status: availabilityStatus,
+          totalRooms,
+          availableRooms,
+          bookedRooms: totalRooms - availableRooms,
+          requestedRooms,
+          canBook: !isFullyBooked
+        },
+        pricing: {
+          startingFrom: lowestPrice === Infinity ? 0 : lowestPrice,
+          startingFromWithGST: lowestPriceWithGST === Infinity ? 0 : lowestPriceWithGST,
+          gstApplicable: gstData ? true : false,
+          gstNote: gstData ? `GST @${gstData.gstPrice}% applicable on rooms above ₹${gstData.gstMaxThreshold}` : null
         }
       });
+    }
+    
+    // Sort: Available hotels first, then by price
+    processedHotels.sort((a, b) => {
+      // Available hotels come first
+      if (a.availability.canBook && !b.availability.canBook) return -1;
+      if (!a.availability.canBook && b.availability.canBook) return 1;
+      // Then sort by starting price
+      return a.pricing.startingFrom - b.pricing.startingFrom;
+    });
+    
+    // Apply pagination
+    const total = processedHotels.length;
+    const paginatedHotels = processedHotels.slice(skip, skip + limitNum);
+    
+    return res.status(200).json({
+      success: true,
+      data: paginatedHotels,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
+      filters: {
+        checkInDate: checkInDate || null,
+        checkOutDate: checkOutDate || null,
+        requestedRooms,
+        guests: guests || null
+      },
+      gstInfo: gstData ? {
+        minThreshold: gstData.gstMinThreshold,
+        maxThreshold: gstData.gstMaxThreshold,
+        defaultRate: gstData.gstPrice
+      } : null
     });
 
-    res.status(200).json({ 
-      success: true, 
-      data: hotels,
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      totalPages: Math.ceil(total / parseInt(limit))
-    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: "Internal Server Error" });
+    console.error("Error in getHotelsByFilters:", error);
+    res.status(500).json({ success: false, error: "Internal Server Error", message: error.message });
   }
 };
-
-// Sample checkAvailability function
-async function checkAvailability({ hotelId, checkInDate, checkOutDate }) {
-  const bookings = await bookingsModel.find({ hotelId });
-
-  let bookedRooms = 0;
-
-  for (const booking of bookings) {
-    const checkIn = new Date(booking.checkInDate);
-    const checkOut = new Date(booking.checkOutDate);
-
-    // Skip bookings that don't overlap with the requested dates
-    if (checkOut < new Date(checkInDate) || checkIn > new Date(checkOutDate)) {
-      continue;
-    }
-
-    bookedRooms += booking.numRooms; // Count booked rooms
-  }
-
-  const hotel = await hotelModel.findOne({ hotelId });
-  const availableRooms =
-    hotel.rooms.reduce((total, room) => total + room.countRooms, 0) -
-    bookedRooms;
-
-  return { availableRooms };
-}
 
 const getHotelsState = async function (req, res) {
   try {
@@ -878,6 +1290,95 @@ cron.schedule("0 0 1 * *", async () => {
 // The second 0 represents the hour (00).
 // The 1 in the third position represents the day of the month (1st).
 // The * in the fourth and fifth positions represents any month and any day of the week.
+
+//============================Auto-cancel pending bookings after 2 hours=======================
+const autoCancelPendingBookings = async () => {
+  try {
+    const currentDate = new Date();
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000; // UTC+5:30
+    const currentDateIST = new Date(currentDate.getTime() + IST_OFFSET);
+    
+    // Calculate 2 hours ago
+    const twoHoursAgo = new Date(currentDateIST.getTime() - 2 * 60 * 60 * 1000);
+    
+    // First, just count to avoid unnecessary work
+    const pendingCount = await bookingsModel.countDocuments({
+      bookingStatus: "Pending",
+      createdAt: { $lte: twoHoursAgo }
+    });
+    
+    if (pendingCount === 0) {
+      return { success: true, cancelledCount: 0 };
+    }
+    
+    console.log(`Found ${pendingCount} pending bookings to cancel`);
+    
+    // Update all pending bookings to cancelled (bulk operation is faster)
+    const result = await bookingsModel.updateMany(
+      {
+        bookingStatus: "Pending",
+        createdAt: { $lte: twoHoursAgo }
+      },
+      {
+        $set: {
+          bookingStatus: "Cancelled",
+          cancellationReason: "Auto-cancelled: Booking not confirmed within 2 hours",
+          cancelledAt: currentDateIST
+        }
+      }
+    );
+    
+    console.log(`Auto-cancelled ${result.modifiedCount} pending bookings`);
+    
+    // Send emails asynchronously without blocking (optional - can be disabled for better performance)
+    // Uncomment below if you want to send emails
+    /*
+    const pendingBookings = await bookingsModel.find({
+      bookingStatus: "Cancelled",
+      cancellationReason: "Auto-cancelled: Booking not confirmed within 2 hours",
+      cancelledAt: currentDateIST
+    }).limit(pendingCount);
+    
+    // Send emails in background without waiting
+    setImmediate(async () => {
+      for (const booking of pendingBookings) {
+        if (booking.user && booking.user.email) {
+          try {
+            await sendCustomEmail({
+              email: booking.user.email,
+              subject: "Booking Cancelled - Payment Not Completed",
+              message: `Dear ${booking.user.name || 'Customer'},\n\nYour booking (ID: ${booking.bookingId}) has been automatically cancelled as payment was not completed within 2 hours.\n\nBooking Details:\n- Hotel: ${booking.hotelDetails?.hotelName || 'N/A'}\n- Check-in: ${booking.checkInDate}\n- Check-out: ${booking.checkOutDate}\n\nPlease make a new booking if you still wish to proceed.`,
+              link: process.env.FRONTEND_URL,
+            });
+          } catch (emailError) {
+            console.error(`Failed to send cancellation email for booking ${booking.bookingId}:`, emailError);
+          }
+        }
+      }
+    });
+    */
+    
+    return { success: true, cancelledCount: result.modifiedCount };
+  } catch (error) {
+    console.error("Error in autoCancelPendingBookings:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Run every 30 minutes to check for pending bookings (reduced frequency)
+cron.schedule("*/30 * * * *", async () => {
+  // Run in background without blocking
+  setImmediate(async () => {
+    try {
+      await autoCancelPendingBookings();
+    } catch (error) {
+      console.error("Auto-cancel cron error:", error);
+    }
+  });
+});
+// */30 means every 30 minutes (reduced from 15 minutes)
+// setImmediate ensures it runs in background without blocking other APIs
+
 //=========================================list of applied coupons hotel==========================
 const getCouponsAppliedHotels = async (req, res) => {
   try {
@@ -925,4 +1426,5 @@ module.exports = {
   getCountPendingHotels,
   updateHotelImage,
   deleteHotelImages,
+  autoCancelPendingBookings,
 };

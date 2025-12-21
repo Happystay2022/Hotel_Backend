@@ -43,9 +43,26 @@ const hotelsSchema = new mongoose.Schema(
         },
         rating: {
             type: Number,
+            default: 0,
         },
         reviewCount: {
             type: Number,
+            default: 0,
+        },
+        // Detailed rating breakdown
+        ratingBreakdown: {
+            cleanliness: { type: Number, default: 0 },
+            service: { type: Number, default: 0 },
+            valueForMoney: { type: Number, default: 0 },
+            location: { type: Number, default: 0 },
+        },
+        // Rating distribution (how many 1-star, 2-star, etc.)
+        ratingDistribution: {
+            oneStar: { type: Number, default: 0 },
+            twoStar: { type: Number, default: 0 },
+            threeStar: { type: Number, default: 0 },
+            fourStar: { type: Number, default: 0 },
+            fiveStar: { type: Number, default: 0 },
         },
         starRating: {
             type: String,
@@ -91,5 +108,15 @@ const hotelsSchema = new mongoose.Schema(
 
     { timestamps: true }
 );
+
+// Add indexes for performance optimization
+hotelsSchema.index({ hotelId: 1 }); // Primary lookup
+hotelsSchema.index({ isAccepted: 1 }); // Filter by acceptance
+hotelsSchema.index({ onFront: 1 }); // Featured hotels
+hotelsSchema.index({ city: 1 }); // City search
+hotelsSchema.index({ state: 1 }); // State search
+hotelsSchema.index({ starRating: 1 }); // Rating filter
+hotelsSchema.index({ city: 1, isAccepted: 1 }); // Compound for city + accepted
+hotelsSchema.index({ 'rooms.roomId': 1 }); // Room lookup
 
 module.exports = mongoose.model('hotels', hotelsSchema);

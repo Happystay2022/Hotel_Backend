@@ -50,6 +50,13 @@ const bookingSchema = new mongoose.Schema(
       type: Number,
       required: false,
     },
+    guestDetails: 
+      {
+        fullName: String,
+        mobile: String,
+        email: String,
+      },
+
     foodDetails: [
       {
         foodId: String,
@@ -105,6 +112,19 @@ const bookingSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Review tracking
+    hasReview: {
+      type: Boolean,
+      default: false,
+    },
+    reviewId: {
+      type: String,
+      default: null,
+    },
+    reviewGivenAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: {
@@ -116,5 +136,11 @@ const bookingSchema = new mongoose.Schema(
     },
   },
 );
+
+// Add indexes for performance optimization
+bookingSchema.index({ bookingStatus: 1, createdAt: 1 }); // For auto-cancel query
+bookingSchema.index({ hotelId: 1, checkInDate: 1, checkOutDate: 1 }); // For availability check
+bookingSchema.index({ userId: 1 }); // For user bookings
+bookingSchema.index({ bookingStatus: 1 }); // For status filtering
 
 module.exports = mongoose.model("Booking", bookingSchema);

@@ -14,13 +14,6 @@ const setupChatRoutes = require("./routes/chatApp/chatAppRoutes");
 const numCPUs = os.cpus().length;
 const USE_CLUSTER = false;
 
-const CORS_ORIGINS = [
-  "http://localhost:3030",
-  "http://localhost:5173",
-  "https://hotelroomsstay.com",
-  "https://roomsstay.vercel.app",
-];
-
 const PORT = process.env.PORT || 5000;
 
 const startServer = () => {
@@ -28,13 +21,21 @@ const startServer = () => {
   const server = http.createServer(app);
   const io = socketIo(server, {
     cors: {
-      origin: CORS_ORIGINS,
-      methods: ["GET", "POST"],
-      credentials: true,
+      origin: "*",
+      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     },
   });
 
-  app.use(cors());
+  // CORS configuration - allow all origins
+  app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  }));
+  
+  // Handle preflight requests
+  app.options("*", cors());
+  
   app.use(express.json());
 
   app.use("/mail", mailerRoutes);
