@@ -841,34 +841,145 @@ const getHotelsById = async (req, res) => {
     const isFullyBooked = availableRooms < requestedRooms;
     const availabilityStatus = isFullyBooked ? "Fully Booked" : "Available";
 
-    // Prepare response with all calculations
-    const responseData = {
-      ...hotel,
-      rooms: processedRooms,
-      availability: checkInDate && checkOutDate ? {
-        status: availabilityStatus,
-        totalRooms,
-        availableRooms,
-        bookedRooms: totalRooms - availableRooms,
-        requestedRooms,
-        canBook: !isFullyBooked,
-        checkInDate,
-        checkOutDate
-      } : null,
-      pricing: {
-        startingFrom: lowestPrice === Infinity ? 0 : lowestPrice,
-        startingFromWithGST: lowestPriceWithGST === Infinity ? 0 : lowestPriceWithGST,
-        gstApplicable: gstData ? true : false,
-        gstNote: gstData ? `GST @${gstData.gstPrice}% applicable on rooms above ₹${gstData.gstMaxThreshold}` : null
-      },
-      gstInfo: gstData ? {
-        minThreshold: gstData.gstMinThreshold,
-        maxThreshold: gstData.gstMaxThreshold,
-        defaultRate: gstData.gstPrice
-      } : null
+    // Build frontend-ready response structure as requested
+    const formatCurrency = (val) => {
+      try {
+        return Number(val).toLocaleString('en-IN');
+      } catch (e) {
+        return String(val);
+      }
     };
 
-    res.json({ success: true, data: responseData });
+    const mappedRooms = processedRooms.map(r => {
+      const id = r.roomId || r._id || r.roomId || r.id || (r._id && String(r._id));
+      const name = r.name || r.roomName || r.type || (r.type && String(r.type)) || 'Room';
+      const bedType = r.bedTypes || r.bedType || '';
+      const images = r.images || [];
+      const total = r.totalCount != null ? r.totalCount : (r.countRooms != null ? r.countRooms : 0);
+      const available = r.availableCount != null ? r.availableCount : (r.countRooms != null ? Math.max(0, (r.countRooms || 0) - (r.bookedCount || 0)) : 0);
+      const basePrice = r.originalPrice != null ? r.originalPrice : (r.price || 0);
+      const taxPercent = r.gstPercent != null ? r.gstPercent : (gstData ? gstData.gstPrice : 0);
+      const taxAmount = r.gstAmount != null ? r.gstAmount : Math.round((basePrice * taxPercent) / 100);
+      const finalPrice = r.priceWithGST != null ? r.priceWithGST : (basePrice + taxAmount);
+
+      return {
+        id: id,
+        name: name,
+        type: r.type || r.roomType || '',
+        bedType: bedType,
+        images: images,
+        inventory: {
+          total: total,
+          available: available,
+          isSoldOut: available <= 0
+        },
+        pricing: {
+          basePrice: Number(basePrice) || 0,
+          taxPercent: Number(taxPercent) || 0,
+          taxAmount: Number(taxAmount) || 0,
+          finalPrice: Number(finalPrice) || 0,
+          currency: '₹',
+          displayPrice: `₹ ${formatCurrency(Number(finalPrice) || 0)}`
+        },
+        features: {
+          isOffer: !!r.isOffer || !!r.offerApplied,
+          offerText: r.offerText || r.offerExp || ''
+        }
+      };
+    });
+
+    // Map amenities to array of strings
+    let mappedAmenities = [];
+    if (Array.isArray(hotel.amenities)) {
+      mappedAmenities = hotel.amenities.map(a => {
+        if (!a) return null;
+        if (typeof a === 'string') return a;
+        if (a.name) return a.name;
+        if (a.amenities) return a.amenities;
+        return Object.values(a).join(' ');
+      }).filter(Boolean);
+    }
+
+    // Map policies
+    const policiesObj = {
+      checkIn: '12:00 PM',
+      checkOut: '11:00 AM',
+      rules: [],
+      restrictions: {
+        petsAllowed: false,
+        smokingAllowed: false,
+        alcoholAllowed: false
+      },
+      cancellationText: ''
+    };
+
+    if (hotel.policies) {
+      // If policies is an object with keys, try to map directly
+      if (!Array.isArray(hotel.policies) && typeof hotel.policies === 'object') {
+        policiesObj.checkIn = hotel.policies.checkIn || policiesObj.checkIn;
+        policiesObj.checkOut = hotel.policies.checkOut || policiesObj.checkOut;
+        policiesObj.rules = hotel.policies.rules || policiesObj.rules;
+        policiesObj.restrictions = hotel.policies.restrictions || policiesObj.restrictions;
+        policiesObj.cancellationText = hotel.policies.cancellationText || hotel.policies.cancellationText || policiesObj.cancellationText;
+      } else if (Array.isArray(hotel.policies)) {
+        // If policies is an array of objects, try to extract known keys
+        hotel.policies.forEach(p => {
+          if (!p || typeof p !== 'object') return;
+          if (p.checkIn) policiesObj.checkIn = p.checkIn;
+          if (p.checkOut) policiesObj.checkOut = p.checkOut;
+          if (Array.isArray(p.rules)) policiesObj.rules = p.rules;
+          if (p.restrictions) policiesObj.restrictions = p.restrictions;
+          if (p.cancellationText) policiesObj.cancellationText = p.cancellationText;
+        });
+      }
+    }
+
+    const responsePayload = {
+      _id: hotel._id,
+      basicInfo: {
+        name: hotel.hotelName || hotel.basicInfo?.name || '',
+        owner: hotel.hotelOwnerName || hotel.basicInfo?.owner || '',
+        description: hotel.description || hotel.basicInfo?.description || '',
+        category: hotel.hotelCategory || hotel.basicInfo?.category || '',
+        starRating: hotel.starRating != null ? Number(hotel.starRating) : (hotel.rating || 0),
+        images: hotel.images || [],
+        location: {
+          address: hotel.landmark || hotel.location?.address || '',
+          city: hotel.city || hotel.location?.city || '',
+          state: hotel.state || hotel.location?.state || '',
+          pinCode: hotel.pinCode || hotel.location?.pinCode || '',
+          coordinates: {
+            lat: hotel.latitude || (hotel.location && hotel.location.coordinates && hotel.location.coordinates.lat) || null,
+            lng: hotel.longitude || (hotel.location && hotel.location.coordinates && hotel.location.coordinates.lng) || null
+          },
+          googleMapLink: hotel.googleMapLink || ''
+        },
+        contacts: {
+          phone: hotel.contact || hotel.basicInfo?.contacts?.phone || '',
+          email: hotel.hotelEmail || hotel.basicInfo?.contacts?.email || '',
+          generalManager: hotel.generalManagerContact || '',
+          salesManager: hotel.salesManagerContact || ''
+        }
+      },
+      pricingOverview: {
+        lowestBasePrice: lowestPrice === Infinity ? 0 : Math.round(lowestPrice),
+        lowestPriceWithTax: lowestPriceWithGST === Infinity ? 0 : Math.round(lowestPriceWithGST),
+        currencySymbol: '₹',
+        displayString: `Starts from ₹ ${formatCurrency(lowestPrice === Infinity ? 0 : Math.round(lowestPrice))}`,
+        taxNote: gstData ? `GST ${gstData.gstPrice}% applicable (Included in final price)` : ''
+      },
+      rooms: mappedRooms,
+      policies: policiesObj,
+      amenities: mappedAmenities,
+      gstConfig: gstData ? {
+        enabled: true,
+        rate: gstData.gstPrice,
+        minLimit: gstData.gstMinThreshold,
+        maxLimit: gstData.gstMaxThreshold
+      } : { enabled: false, rate: 0, minLimit: 0, maxLimit: 0 }
+    };
+
+    res.json({ success: true, data: responsePayload });
   } catch (error) {
     console.error("Error in getHotelsById:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -927,6 +1038,17 @@ const getHotelsByFilters = async (req, res) => {
       limit = 10,
       guests,
     } = req.query;
+
+    // Normalize and trim incoming string parameters to avoid mismatches caused by
+    // leading/trailing spaces (e.g., "Patna " should match "Patna").
+    const trimString = (v) => (v === undefined || v === null ? v : String(v).trim());
+    const searchTrim = trimString(search);
+    const propertyTypeTrim = trimString(propertyType);
+    const hotelCategoryTrim = trimString(hotelCategory);
+    const typeTrim = trimString(type);
+    const bedTypesTrim = trimString(bedTypes);
+    const amenitiesTrim = trimString(amenities);
+    const unmarriedCouplesAllowedTrim = trimString(unmarriedCouplesAllowed);
     
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 10;
@@ -937,9 +1059,9 @@ const getHotelsByFilters = async (req, res) => {
 
     // If no query filters are provided at all, return an empty array
     const hasAnyFilter = [
-      search, starRating, propertyType, localId, latitude, longitude,
-      countRooms, hotelCategory, type, bedTypes, amenities,
-      unmarriedCouplesAllowed, minPrice, maxPrice, checkInDate, checkOutDate,
+      searchTrim, starRating, propertyTypeTrim, localId, latitude, longitude,
+      countRooms, hotelCategoryTrim, typeTrim, bedTypesTrim, amenitiesTrim,
+      unmarriedCouplesAllowedTrim, minPrice, maxPrice, checkInDate, checkOutDate,
     ].some((v) => v !== undefined && v !== null && String(v).trim() !== "");
 
     if (!hasAnyFilter) {
@@ -947,8 +1069,8 @@ const getHotelsByFilters = async (req, res) => {
     }
 
     // Build search filters
-    if (search) {
-      const searchPattern = new RegExp(search, "i");
+    if (searchTrim) {
+      const searchPattern = new RegExp(searchTrim, "i");
       filters.$or = [
         { city: { $regex: searchPattern } },
         { state: { $regex: searchPattern } },
@@ -956,17 +1078,19 @@ const getHotelsByFilters = async (req, res) => {
         { hotelName: { $regex: searchPattern } },
       ];
     }
-
     if (starRating) filters.starRating = starRating;
-    if (propertyType) filters.propertyType = { $regex: new RegExp(propertyType, "i") };
+    if (propertyTypeTrim) filters.propertyType = { $regex: new RegExp(propertyTypeTrim, "i") };
     if (localId) filters.localId = localId;
-    if (hotelCategory) filters.hotelCategory = { $regex: new RegExp(hotelCategory, "i") };
+    if (hotelCategoryTrim) filters.hotelCategory = { $regex: new RegExp(hotelCategoryTrim, "i") };
     if (latitude) filters.latitude = latitude;
     if (longitude) filters.longitude = longitude;
-    if (type) filters["rooms.type"] = { $regex: new RegExp(type, "i") };
-    if (bedTypes) filters["rooms.bedTypes"] = { $regex: new RegExp(bedTypes, "i") };
-    if (amenities) filters["amenities.amenities"] = { $in: amenities.split(",") };
-    if (unmarriedCouplesAllowed) filters["policies.unmarriedCouplesAllowed"] = unmarriedCouplesAllowed;
+    if (typeTrim) filters["rooms.type"] = { $regex: new RegExp(typeTrim, "i") };
+    if (bedTypesTrim) filters["rooms.bedTypes"] = { $regex: new RegExp(bedTypesTrim, "i") };
+    if (amenitiesTrim) {
+      const amenArr = amenitiesTrim.split(",").map(a => a.trim()).filter(a => a !== "");
+      if (amenArr.length > 0) filters["amenities.amenities"] = { $in: amenArr };
+    }
+    if (unmarriedCouplesAllowedTrim) filters["policies.unmarriedCouplesAllowed"] = unmarriedCouplesAllowedTrim;
 
     // Fetch all required data in parallel for performance
     const [monthlyData, gstData, allBookings, allHotels] = await Promise.all([
@@ -1298,13 +1422,13 @@ const autoCancelPendingBookings = async () => {
     const IST_OFFSET = 5.5 * 60 * 60 * 1000; // UTC+5:30
     const currentDateIST = new Date(currentDate.getTime() + IST_OFFSET);
     
-    // Calculate 2 hours ago
-    const twoHoursAgo = new Date(currentDateIST.getTime() - 2 * 60 * 60 * 1000);
+    // Calculate 12 hours ago
+    const twelveHoursAgo = new Date(currentDateIST.getTime() - 12 * 60 * 60 * 1000);
     
     // First, just count to avoid unnecessary work
     const pendingCount = await bookingsModel.countDocuments({
       bookingStatus: "Pending",
-      createdAt: { $lte: twoHoursAgo }
+      createdAt: { $lte: twelveHoursAgo }
     });
     
     if (pendingCount === 0) {
