@@ -11,22 +11,33 @@ exports.createBooking = async (req, res) => {
     }
 
     if (seats.length > 0) {
-      const conflict = await TourBooking.findOne({
-        tourId: data.tourId,
-        vehicleId: data.vehicleId,
-        status: { $ne: "cancelled" },
-        seats: { $in: seats }
-      }).select("_id bookingCode seats");
+      const tour = await TourModel.findById(data.tourId).select("vehicles");
+      if (!tour) return res.status(404).json({ message: "Tour not found" });
 
-      if (conflict) {
+      const vehicle = tour.vehicles.find(v => String(v._id) === String(data.vehicleId));
+      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+
+      const bookedSet = new Set(vehicle.bookedSeats || []);
+      const conflictSeats = seats.filter(seat => bookedSet.has(seat));
+
+      if (conflictSeats.length > 0) {
         return res.status(409).json({
           message: "Some seats already booked",
-          conflict
+          conflictSeats
         });
       }
     }
 
     const newBooking = await TourBooking.create(data);
+
+    // Decrement seats in tour vehicle
+    if (seats.length > 0) {
+      await TourModel.updateOne(
+        { _id: data.tourId, "vehicles._id": data.vehicleId },
+        { $push: { "vehicles.$.bookedSeats": { $each: seats } } }
+      );
+    }
+
     return res.status(201).json(newBooking);
   } catch (error) {
     return res.status(500).json({
@@ -50,19 +61,7 @@ exports.getVehicleSeats = async (req, res) => {
       ? vehicle.seatLayout
       : Array.from({ length: Number(vehicle.totalSeats || 0) }, (_, i) => String(i + 1));
 
-    const bookedAgg = await TourBooking.aggregate([
-      {
-        $match: {
-          tourId: String(tour._id),
-          vehicleId: String(vehicle._id),
-          status: { $ne: "cancelled" }
-        }
-      },
-      { $unwind: "$seats" },
-      { $group: { _id: null, booked: { $addToSet: "$seats" } } }
-    ]);
-
-    const bookedSeats = bookedAgg?.[0]?.booked || [];
+    const bookedSeats = vehicle.bookedSeats || [];
     const bookedSet = new Set(bookedSeats);
 
     const seats = seatLayout.map((code) => ({
@@ -87,6 +86,20 @@ exports.getVehicleSeats = async (req, res) => {
 exports.getBookings = async (req, res) => {
   try {
     const bookings = await TourBooking.find().sort({ createdAt: -1 });
+    return res.status(200).json(bookings);
+  } catch (error) {
+    return res.status(500).json({
+      message: "Something went wrong while fetching bookings",
+      error: error.message,
+    });
+  }
+};
+
+
+exports.getByAgencyEmail = async (req, res) => {
+  try {
+    const { email } = req.params; 
+    const bookings = await TourBooking.find({ agencyEmail: email }).sort({ createdAt: -1 });
     return res.status(200).json(bookings);
   } catch (error) {
     return res.status(500).json({
@@ -163,6 +176,14 @@ exports.updateBooking = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
+    // If status changed to cancelled, free up seats
+    if (booking.status === "cancelled" && booking.seats.length > 0) {
+      await TourModel.updateOne(
+        { _id: booking.tourId, "vehicles._id": booking.vehicleId },
+        { $pullAll: { "vehicles.$.bookedSeats": booking.seats } }
+      );
+    }
+
     return res.status(200).json(booking);
   } catch (error) {
     return res.status(500).json({
@@ -182,6 +203,14 @@ exports.deleteBooking = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
+    // Free up seats on deletion
+    if (booking.seats.length > 0) {
+      await TourModel.updateOne(
+        { _id: booking.tourId, "vehicles._id": booking.vehicleId },
+        { $pullAll: { "vehicles.$.bookedSeats": booking.seats } }
+      );
+    }
+
     return res.status(200).json({ message: "Booking deleted successfully" });
   } catch (error) {
     return res.status(500).json({
@@ -190,3 +219,4 @@ exports.deleteBooking = async (req, res) => {
     });
   }
 };
+

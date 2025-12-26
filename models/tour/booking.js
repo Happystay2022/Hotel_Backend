@@ -46,6 +46,8 @@ const tourBookingSchema = new mongoose.Schema(
 
     // snapshot fields (so booking stays same even if Tour changes later)
     travelAgencyName: { type: String },
+    agencyPhone: { type: String },
+    agencyEmail: { type: String },
     visitngPlaces: { type: String },
     country: { type: String },
     state: { type: String },
@@ -60,8 +62,8 @@ const tourBookingSchema = new mongoose.Schema(
     to: { type: Date },
 
     // pricing snapshot
-    basePrice: { type: Number, default: 0 },   // tour price
-    seatPrice: { type: Number, default: 0 },   // (optional) seat add-on
+    basePrice: { type: Number, default: 0 }, // tour price
+    seatPrice: { type: Number, default: 0 }, // (optional) seat add-on
     tax: { type: Number, default: 0 },
     discount: { type: Number, default: 0 },
     totalAmount: { type: Number, default: 0 },

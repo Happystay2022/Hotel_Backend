@@ -22,6 +22,7 @@ const {
   getTotalSell,
   updateBooking,
   deleteBooking,
+  getByAgencyEmail,
 } = require("../../controllers/tour/booking");
 
 const router = express.Router();
@@ -42,6 +43,7 @@ router.delete("/delete-tour-image/:id",  deleteTourImage);
 //==========================================Booking Routes==========================================
 router.post("/tour-booking/create-tour-booking", createBooking);
 router.get("/tour-booking/get-bookings", getBookings);
+router.get("/tour-booking/get-bookings/by-agency-email/:email", getByAgencyEmail);
 router.get("/tour-booking/get-users-booking", getBookingByUser);
 router.get(
   "/tour-booking/get-users-booking/by/:bookingId",
