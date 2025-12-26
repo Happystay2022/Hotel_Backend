@@ -41,9 +41,7 @@ const tourBookingSchema = new mongoose.Schema(
     numberOfAdults: { type: Number, default: 1, min: 0 },
     numberOfChildren: { type: Number, default: 0, min: 0 },
     passengers: { type: [passengerSchema], default: [] },
-
-    customizable: { type: Boolean, default: false },
-
+    isCustomizable: { type: Boolean, default: false },
     // snapshot fields (so booking stays same even if Tour changes later)
     travelAgencyName: { type: String },
     agencyPhone: { type: String },

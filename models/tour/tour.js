@@ -32,6 +32,7 @@ const tourSchema = new mongoose.Schema(
     nights: Number,
     days: Number,
     from: Date,
+    isCustomizable: { type: Boolean, default: false },
     to: Date,
 
     amenities: [String],
