@@ -99,7 +99,8 @@ exports.getBookings = async (req, res) => {
 exports.getByAgencyEmail = async (req, res) => {
   try {
     const { email } = req.params; 
-    const bookings = await TourBooking.find({ agencyEmail: email }).sort({ createdAt: -1 });
+    const regexEmail = new RegExp(`^${email}$`, 'i'); // case-insensitive regex
+    const bookings = await TourBooking.find({ agencyEmail: regexEmail }).sort({ createdAt: -1 });
     return res.status(200).json(bookings);
   } catch (error) {
     return res.status(500).json({
