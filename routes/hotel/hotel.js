@@ -31,6 +31,5 @@ router.patch('/update-hotels-image-by-hotel-id/:hotelId', upload, hotelControlle
 router.patch('/update-hotels-policy-by-hotel-id/:hotelId', hotelController.updatePolicies); // on panel
 router.delete('/hotels/:hotelId/images/imageUrl', hotelController.deleteHotelImages); // on panel
 router.put('/change-monthly-price/hotel-room', hotelController.monthlyPrice);
-router.get("/tours/:tourId/vehicles/:vehicleId/seats", getVehicleSeats);
 
 module.exports = router;

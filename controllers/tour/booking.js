@@ -48,32 +48,52 @@ exports.createBooking = async (req, res) => {
 };
 
 exports.getVehicleSeats = async (req, res) => {
+  // New behaviour: if only tourId is provided, return all vehicles for the tour
+  // with per-vehicle seat layout and booked status. If vehicleId is provided
+  // (legacy route), still support returning only that vehicle.
   const { tourId, vehicleId } = req.params;
 
   try {
     const tour = await TourModel.findById(tourId).select("vehicles");
     if (!tour) return res.status(404).json({ message: "Tour not found" });
 
-    const vehicle = (tour.vehicles || []).find((v) => String(v._id) === String(vehicleId));
-    if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+    const buildSeatsForVehicle = (vehicle) => {
+      const seatLayout = Array.isArray(vehicle.seatLayout) && vehicle.seatLayout.length > 0
+        ? vehicle.seatLayout
+        : Array.from({ length: Number(vehicle.totalSeats || 0) }, (_, i) => String(i + 1));
 
-    const seatLayout = Array.isArray(vehicle.seatLayout) && vehicle.seatLayout.length > 0
-      ? vehicle.seatLayout
-      : Array.from({ length: Number(vehicle.totalSeats || 0) }, (_, i) => String(i + 1));
+      const bookedSeats = Array.isArray(vehicle.bookedSeats) ? vehicle.bookedSeats : [];
+      const bookedSet = new Set(bookedSeats.map(String));
 
-    const bookedSeats = vehicle.bookedSeats || [];
-    const bookedSet = new Set(bookedSeats);
+      const seats = seatLayout.map((code) => ({
+        code,
+        status: bookedSet.has(String(code)) ? "booked" : "available"
+      }));
 
-    const seats = seatLayout.map((code) => ({
-      code,
-      status: bookedSet.has(code) ? "booked" : "available"
-    }));
+      return {
+        vehicleId: String(vehicle._id),
+        name: vehicle.name || vehicle.vehicleNumber || '',
+        vehicleNumber: vehicle.vehicleNumber || '',
+        totalSeats: Number(vehicle.totalSeats || seatLayout.length || 0),
+        isActive: !!vehicle.isActive,
+        seats,
+        bookedSeats
+      };
+    };
 
-    return res.status(200).json({
-      tourId: String(tour._id),
-      vehicleId: String(vehicle._id),
-      seats
-    });
+    // If vehicleId is provided, return that single vehicle's seats (backward compatible)
+    if (vehicleId) {
+      const vehicle = (tour.vehicles || []).find((v) => String(v._id) === String(vehicleId));
+      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+
+      const payload = buildSeatsForVehicle(vehicle);
+      return res.status(200).json({ tourId: String(tour._id), vehicles: [payload] });
+    }
+
+    // Otherwise return all vehicles with their seat maps
+    const vehicles = (tour.vehicles || []).map(buildSeatsForVehicle);
+
+    return res.status(200).json({ tourId: String(tour._id), vehicles });
   } catch (error) {
     return res.status(500).json({
       message: "Failed to fetch seats",

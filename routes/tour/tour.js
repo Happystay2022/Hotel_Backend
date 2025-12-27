@@ -23,6 +23,7 @@ const {
   updateBooking,
   deleteBooking,
   getByAgencyEmail,
+  getVehicleSeats,
 } = require("../../controllers/tour/booking");
 
 const router = express.Router();
@@ -38,6 +39,8 @@ router.get("/get-tour/by-owner/query", getTourByOwner);
 router.patch("/update-tour/data/:id", updateTour);
 router.patch("/update-tour-image/:id", upload, changeTourImage);
 router.delete("/delete-tour-image/:id",  deleteTourImage);
+router.get("/tours/:tourId/vehicles/:vehicleId/seats", getVehicleSeats);
+
 
 
 //==========================================Booking Routes==========================================
