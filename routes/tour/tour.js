@@ -1,6 +1,6 @@
 const express = require("express");
 const {
-  createTravel,
+  createTour,
   getTourList,
   getTourById,
   sortByOrder,
@@ -27,7 +27,7 @@ const {
 } = require("../../controllers/tour/booking");
 
 const router = express.Router();
-router.post("/create-tour", upload, createTravel);
+router.post("/create-tour", upload, createTour);
 router.get("/get-tour-list", getTourList);
 router.get("/get-tour/:id", getTourById);
 router.get("/sort-tour/by-order", sortByOrder);

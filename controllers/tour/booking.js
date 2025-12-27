@@ -1,243 +1,398 @@
+const mongoose = require("mongoose");
 const TourBooking = require("../../models/tour/booking");
 const TourModel = require("../../models/tour/tour");
 
+/* =========================================================
+   CREATE BOOKING (TRANSACTION SAFE)
+========================================================= */
+
+
 exports.createBooking = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const data = req.body;
+    const {
+      userId,
+      tourId,
+      vehicleId,
 
-    const seats = Array.isArray(data.seats) ? data.seats : [];
-    if (!data.tourId || !data.vehicleId) {
-      return res.status(400).json({ message: "tourId and vehicleId required" });
+      seats = [],
+      numberOfAdults = 0,
+      numberOfChildren = 0,
+      passengers = [],
+
+      from,
+      to,
+      tourStartDate,
+
+      payment,
+      tax = 0,
+      discount = 0
+    } = req.body;
+
+    /* ================= BASIC VALIDATION ================= */
+
+    if (!userId || !tourId || !vehicleId) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "userId, tourId and vehicleId are required"
+      });
     }
 
-    if (seats.length > 0) {
-      const tour = await TourModel.findById(data.tourId).select("vehicles");
-      if (!tour) return res.status(404).json({ message: "Tour not found" });
+    const totalPassengers = numberOfAdults + numberOfChildren;
 
-      const vehicle = tour.vehicles.find(v => String(v._id) === String(data.vehicleId));
-      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
-
-      const bookedSet = new Set(vehicle.bookedSeats || []);
-      const conflictSeats = seats.filter(seat => bookedSet.has(seat));
-
-      if (conflictSeats.length > 0) {
-        return res.status(409).json({
-          message: "Some seats already booked",
-          conflictSeats
-        });
-      }
+    if (seats.length && seats.length !== totalPassengers) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Seats count must match total passengers"
+      });
     }
 
-    const newBooking = await TourBooking.create(data);
+    /* ================= FETCH TOUR ================= */
 
-    // Decrement seats in tour vehicle
+    const tour = await TourModel.findById(tourId)
+      .session(session)
+      .select(
+        "vehicles travelAgencyName agencyPhone agencyEmail visitngPlaces country state city themes nights days from to price amenities inclusion exclusion termsAndConditions dayWise isCustomizable tourStartDate"
+      );
+
+    if (!tour) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Tour not found"
+      });
+    }
+
+    const vehicle = tour.vehicles.find(
+      (v) => String(v._id) === String(vehicleId)
+    );
+
+    if (!vehicle) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Vehicle not found"
+      });
+    }
+
+    /* ================= SEAT CONFLICT CHECK ================= */
+
+    const bookedSet = new Set(vehicle.bookedSeats || []);
+    const conflictSeats = seats.filter((s) => bookedSet.has(s));
+
+    if (conflictSeats.length > 0) {
+      await session.abortTransaction();
+      return res.status(409).json({
+        success: false,
+        message: "Some seats already booked",
+        conflictSeats
+      });
+    }
+
+    /* ================= DATE RESOLUTION (FIXED) ================= */
+
+    const finalFrom =
+      from || tour.from || tour.tourStartDate;
+
+    const finalTo =
+      to ||
+      tour.to ||
+      (finalFrom
+        ? new Date(
+            new Date(finalFrom).getTime() +
+              (Number(tour.days || 1) - 1) * 86400000
+          )
+        : undefined);
+
+    const finalTourStartDate =
+      tourStartDate || finalFrom;
+
+    /* ================= PRICING ================= */
+
+    const basePrice = Number(tour.price || 0);
+    const seatUnitPrice = Number(vehicle.pricePerSeat || 0);
+    const seatPrice = seatUnitPrice * seats.length;
+
+    const totalAmount =
+      basePrice + seatPrice + Number(tax) - Number(discount);
+
+    /* ================= CREATE BOOKING ================= */
+
+    const [booking] = await TourBooking.create(
+      [
+        {
+          userId,
+          tourId,
+          vehicleId,
+
+          seats,
+          status: payment?.paidAt ? "confirmed" : "pending",
+
+          numberOfAdults,
+          numberOfChildren,
+          passengers,
+
+          isCustomizable: tour.isCustomizable,
+
+          /* ===== SNAPSHOT (VERY IMPORTANT) ===== */
+          travelAgencyName: tour.travelAgencyName,
+          agencyPhone: tour.agencyPhone,
+          agencyEmail: tour.agencyEmail,
+
+          visitngPlaces: tour.visitngPlaces,
+          country: tour.country,
+          state: tour.state,
+          city: tour.city,
+          themes: tour.themes,
+
+          nights: tour.nights,
+          days: tour.days,
+
+          from: finalFrom,
+          to: finalTo,
+          tourStartDate: finalTourStartDate,
+
+          amenities: tour.amenities,
+          inclusion: tour.inclusion,
+          exclusion: tour.exclusion,
+          termsAndConditions: tour.termsAndConditions,
+          dayWise: tour.dayWise,
+
+          basePrice,
+          seatPrice,
+          tax,
+          discount,
+          totalAmount,
+
+          payment
+        }
+      ],
+      { session }
+    );
+
+    /* ================= LOCK SEATS ================= */
+
     if (seats.length > 0) {
       await TourModel.updateOne(
-        { _id: data.tourId, "vehicles._id": data.vehicleId },
-        { $push: { "vehicles.$.bookedSeats": { $each: seats } } }
+        {
+          _id: tourId,
+          "vehicles._id": vehicleId,
+          "vehicles.bookedSeats": { $nin: seats }
+        },
+        {
+          $push: {
+            "vehicles.$.bookedSeats": { $each: seats }
+          }
+        },
+        { session }
       );
     }
 
-    return res.status(201).json(newBooking);
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(201).json({
+      success: true,
+      message: "Booking created successfully",
+      data: booking
+    });
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
     return res.status(500).json({
-      message: "Something went wrong while creating the booking",
+      success: false,
+      message: "Failed to create booking",
       error: error.message
     });
   }
 };
 
+
+/* =========================================================
+   GET VEHICLE SEATS
+========================================================= */
 exports.getVehicleSeats = async (req, res) => {
-  // New behaviour: if only tourId is provided, return all vehicles for the tour
-  // with per-vehicle seat layout and booked status. If vehicleId is provided
-  // (legacy route), still support returning only that vehicle.
-  const { tourId, vehicleId } = req.params;
-
   try {
+    const { tourId, vehicleId } = req.params;
+
     const tour = await TourModel.findById(tourId).select("vehicles");
-    if (!tour) return res.status(404).json({ message: "Tour not found" });
+    if (!tour)
+      return res.status(404).json({ success: false, message: "Tour not found" });
 
-    const buildSeatsForVehicle = (vehicle) => {
-      const seatLayout = Array.isArray(vehicle.seatLayout) && vehicle.seatLayout.length > 0
-        ? vehicle.seatLayout
-        : Array.from({ length: Number(vehicle.totalSeats || 0) }, (_, i) => String(i + 1));
+    const vehicle = tour.vehicles.find(
+      (v) => String(v._id) === String(vehicleId)
+    );
 
-      const bookedSeats = Array.isArray(vehicle.bookedSeats) ? vehicle.bookedSeats : [];
-      const bookedSet = new Set(bookedSeats.map(String));
+    if (!vehicle)
+      return res.status(404).json({ success: false, message: "Vehicle not found" });
 
-      const seats = seatLayout.map((code) => ({
+    const bookedSet = new Set(vehicle.bookedSeats || []);
+    let seatLayout = [];
+    let seatMatrix = [];
+
+    if (vehicle.seatLayout?.length) {
+      seatLayout = vehicle.seatLayout;
+      seatMatrix = seatLayout.map((code) => ({
         code,
-        status: bookedSet.has(String(code)) ? "booked" : "available"
+        status: bookedSet.has(code) ? "booked" : "available"
       }));
+    } else if (vehicle.seatConfig) {
+      const { rows, left, right, aisle } = vehicle.seatConfig;
 
-      return {
-        vehicleId: String(vehicle._id),
-        name: vehicle.name || vehicle.vehicleNumber || '',
-        vehicleNumber: vehicle.vehicleNumber || '',
-        totalSeats: Number(vehicle.totalSeats || seatLayout.length || 0),
-        isActive: !!vehicle.isActive,
-        seats,
-        bookedSeats
-      };
-    };
+      for (let r = 1; r <= rows; r++) {
+        const row = [];
 
-    // If vehicleId is provided, return that single vehicle's seats (backward compatible)
-    if (vehicleId) {
-      const vehicle = (tour.vehicles || []).find((v) => String(v._id) === String(vehicleId));
-      if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+        for (let l = 0; l < left; l++) {
+          const code = `${r}${String.fromCharCode(65 + l)}`;
+          seatLayout.push(code);
+          row.push({
+            code,
+            side: "left",
+            status: bookedSet.has(code) ? "booked" : "available"
+          });
+        }
 
-      const payload = buildSeatsForVehicle(vehicle);
-      return res.status(200).json({ tourId: String(tour._id), vehicles: [payload] });
+        if (aisle) row.push({ type: "aisle" });
+
+        for (let k = 0; k < right; k++) {
+          const code = `${r}${String.fromCharCode(65 + left + k)}`;
+          seatLayout.push(code);
+          row.push({
+            code,
+            side: "right",
+            status: bookedSet.has(code) ? "booked" : "available"
+          });
+        }
+
+        seatMatrix.push(row);
+      }
+    } else {
+      seatLayout = Array.from(
+        { length: vehicle.totalSeats || 0 },
+        (_, i) => String(i + 1)
+      );
+
+      seatMatrix = seatLayout.map((code) => ({
+        code,
+        status: bookedSet.has(code) ? "booked" : "available"
+      }));
     }
 
-    // Otherwise return all vehicles with their seat maps
-    const vehicles = (tour.vehicles || []).map(buildSeatsForVehicle);
-
-    return res.status(200).json({ tourId: String(tour._id), vehicles });
+    return res.json({
+      success: true,
+      vehicle: {
+        _id: vehicle._id,
+        name: vehicle.name,
+        vehicleNumber: vehicle.vehicleNumber,
+        totalSeats: vehicle.totalSeats,
+        seaterType: vehicle.seaterType,
+        seatConfig: vehicle.seatConfig || null,
+        seatLayout,
+        seatMatrix,
+        bookedSeats: vehicle.bookedSeats
+      }
+    });
   } catch (error) {
     return res.status(500).json({
-      message: "Failed to fetch seats",
+      success: false,
+      message: "Failed to fetch vehicle seats",
       error: error.message
     });
   }
 };
 
-
-exports.getBookings = async (req, res) => {
+/* =========================================================
+   GET BOOKINGS
+========================================================= */
+exports.getBookings = async (_, res) => {
   try {
     const bookings = await TourBooking.find().sort({ createdAt: -1 });
-    return res.status(200).json(bookings);
-  } catch (error) {
-    return res.status(500).json({
-      message: "Something went wrong while fetching bookings",
-      error: error.message,
-    });
+    res.json({ success: true, data: bookings });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 };
-
 
 exports.getByAgencyEmail = async (req, res) => {
   try {
-    const { email } = req.params; 
-    const regexEmail = new RegExp(`^${email}$`, 'i'); // case-insensitive regex
-    const bookings = await TourBooking.find({ agencyEmail: regexEmail }).sort({ createdAt: -1 });
-    return res.status(200).json(bookings);
-  } catch (error) {
-    return res.status(500).json({
-      message: "Something went wrong while fetching bookings",
-      error: error.message,
-    });
+    const regex = new RegExp(`^${req.params.email}$`, "i");
+    const bookings = await TourBooking.find({ agencyEmail: regex }).sort({ createdAt: -1 });
+    res.json({ success: true, data: bookings });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 };
 
 exports.getBookingsByBookingId = async (req, res) => {
-  const { bookingCode } = req.params;
+  const booking = await TourBooking.findOne({ bookingCode: req.params.bookingCode });
+  if (!booking)
+    return res.status(404).json({ success: false, message: "Booking not found" });
 
-  try {
-    const booking = await TourBooking.findOne({ bookingCode });
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    return res.status(200).json(booking);
-  } catch (error) {
-    return res.status(500).json({
-      message: "Something went wrong while fetching the booking",
-      error: error.message,
-    });
-  }
+  res.json({ success: true, data: booking });
 };
 
 exports.getBookingByUser = async (req, res) => {
-  try {
-    const { userId } = req.query;
-
-    const bookings = await TourBooking.find({ userId }).sort({ createdAt: -1 });
-    return res.status(200).json(bookings);
-  } catch (error) {
-    return res.status(500).json({
-      message: "Something went wrong while fetching user bookings",
-      error: error.message,
-    });
-  }
+  const bookings = await TourBooking.find({ userId: req.query.userId }).sort({ createdAt: -1 });
+  res.json({ success: true, data: bookings });
 };
 
-exports.getTotalSell = async (req, res) => {
-  try {
-    const result = await TourBooking.aggregate([
-      { $match: { status: { $ne: "cancelled" } } },
-      {
-        $group: {
-          _id: null,
-          totalSell: { $sum: "$totalAmount" },
-        },
-      },
-    ]);
+/* =========================================================
+   TOTAL SELL
+========================================================= */
+exports.getTotalSell = async (_, res) => {
+  const result = await TourBooking.aggregate([
+    { $match: { status: { $ne: "cancelled" } } },
+    { $group: { _id: null, totalSell: { $sum: "$totalAmount" } } }
+  ]);
 
-    const totalSell = result.length > 0 ? result[0].totalSell : 0;
-    return res.status(200).json({ totalSell });
-  } catch (error) {
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
+  res.json({ success: true, totalSell: result[0]?.totalSell || 0 });
 };
 
+/* =========================================================
+   UPDATE BOOKING (CANCEL SAFE)
+========================================================= */
 exports.updateBooking = async (req, res) => {
-  const { bookingCode } = req.params;
-  const data = req.body;
+  const booking = await TourBooking.findOneAndUpdate(
+    { bookingCode: req.params.bookingCode },
+    req.body,
+    { new: true }
+  );
 
-  try {
-    const booking = await TourBooking.findOneAndUpdate(
-      { bookingCode },
-      data,
-      { new: true, runValidators: true }
+  if (!booking)
+    return res.status(404).json({ success: false, message: "Booking not found" });
+
+  if (booking.status === "cancelled" && booking.seats.length) {
+    await TourModel.updateOne(
+      { _id: booking.tourId, "vehicles._id": booking.vehicleId },
+      { $pullAll: { "vehicles.$.bookedSeats": booking.seats } }
     );
-
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    // If status changed to cancelled, free up seats
-    if (booking.status === "cancelled" && booking.seats.length > 0) {
-      await TourModel.updateOne(
-        { _id: booking.tourId, "vehicles._id": booking.vehicleId },
-        { $pullAll: { "vehicles.$.bookedSeats": booking.seats } }
-      );
-    }
-
-    return res.status(200).json(booking);
-  } catch (error) {
-    return res.status(500).json({
-      message: "Internal Server Error",
-      error: error.message,
-    });
   }
+
+  res.json({ success: true, data: booking });
 };
 
+/* =========================================================
+   DELETE BOOKING
+========================================================= */
 exports.deleteBooking = async (req, res) => {
-  const { bookingCode } = req.params;
+  const booking = await TourBooking.findOneAndDelete({
+    bookingCode: req.params.bookingCode
+  });
 
-  try {
-    const booking = await TourBooking.findOneAndDelete({ bookingCode });
+  if (!booking)
+    return res.status(404).json({ success: false, message: "Booking not found" });
 
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    // Free up seats on deletion
-    if (booking.seats.length > 0) {
-      await TourModel.updateOne(
-        { _id: booking.tourId, "vehicles._id": booking.vehicleId },
-        { $pullAll: { "vehicles.$.bookedSeats": booking.seats } }
-      );
-    }
-
-    return res.status(200).json({ message: "Booking deleted successfully" });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Internal Server Error",
-      error: error.message,
-    });
+  if (booking.seats.length) {
+    await TourModel.updateOne(
+      { _id: booking.tourId, "vehicles._id": booking.vehicleId },
+      { $pullAll: { "vehicles.$.bookedSeats": booking.seats } }
+    );
   }
-};
 
+  res.json({ success: true, message: "Booking deleted successfully" });
+};

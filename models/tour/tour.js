@@ -2,13 +2,25 @@ const mongoose = require("mongoose");
 
 const vehicleSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true }, // e.g. "Innova"
-    vehicleNumber: { type: String }, // optional
+    name: { type: String, required: true },
+    vehicleNumber: { type: String },
+
     totalSeats: { type: Number, required: true, min: 1 },
-    seaterType: { type: String }, // e.g. "2x2", "2x3", "3x2", "2x1" - seating configuration
-    seatLayout: { type: [String], default: [] }, // e.g. ["1A","1B","2A"...]
-    bookedSeats: { type: [String], default: [] }, // booked seat codes
-    pricePerSeat: { type: Number, default: 0 }, // optional add-on
+
+    // 🔥 structured seat config
+    seatConfig: {
+      rows: { type: Number, required: true }, // total rows
+      left: { type: Number, required: true }, // seats on left side
+      right: { type: Number, required: true }, // seats on right side
+      aisle: { type: Boolean, default: true }, // aisle present or not
+    },
+
+    seaterType: { type: String }, // "2x2" (display purpose only)
+
+    seatLayout: { type: [String], default: [] }, // auto / custom
+    bookedSeats: { type: [String], default: [] },
+
+    pricePerSeat: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
   },
   { _id: true }
