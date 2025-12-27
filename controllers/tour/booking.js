@@ -357,23 +357,70 @@ exports.getTotalSell = async (_, res) => {
    UPDATE BOOKING (CANCEL SAFE)
 ========================================================= */
 exports.updateBooking = async (req, res) => {
-  const booking = await TourBooking.findOneAndUpdate(
-    { bookingCode: req.params.bookingCode },
-    req.body,
-    { new: true }
-  );
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  if (!booking)
-    return res.status(404).json({ success: false, message: "Booking not found" });
+  try {
+    const { bookingId } = req.params;
+    const updateData = req.body;
 
-  if (booking.status === "cancelled" && booking.seats.length) {
-    await TourModel.updateOne(
-      { _id: booking.tourId, "vehicles._id": booking.vehicleId },
-      { $pullAll: { "vehicles.$.bookedSeats": booking.seats } }
-    );
+    // 1️⃣ Find booking first
+    const booking = await TourBooking.findById(bookingId).session(session);
+
+    if (!booking) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const previousStatus = booking.status;
+
+    // 2️⃣ Update booking
+    Object.assign(booking, updateData);
+    await booking.save({ session });
+
+    // 3️⃣ Unlock seats ONLY when:
+    //    pending/confirmed → cancelled
+    if (
+      previousStatus !== "cancelled" &&
+      booking.status === "cancelled" &&
+      booking.seats?.length
+    ) {
+      await TourModel.updateOne(
+        {
+          _id: booking.tourId,
+          "vehicles._id": booking.vehicleId,
+        },
+        {
+          $pull: {
+            "vehicles.$.bookedSeats": { $in: booking.seats },
+          },
+        },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.json({
+      success: true,
+      message: "Booking updated successfully",
+      data: booking,
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update booking",
+      error: error.message,
+    });
   }
-
-  res.json({ success: true, data: booking });
 };
 
 /* =========================================================
@@ -381,7 +428,7 @@ exports.updateBooking = async (req, res) => {
 ========================================================= */
 exports.deleteBooking = async (req, res) => {
   const booking = await TourBooking.findOneAndDelete({
-    bookingCode: req.params.bookingCode
+    bookingId: req.params.bookingId
   });
 
   if (!booking)
